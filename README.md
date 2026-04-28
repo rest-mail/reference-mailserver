@@ -1,8 +1,8 @@
 # reference-mailserver
 
-A thin composer that assembles `reference-postfix` + `reference-dovecot` + Postgres + `reference-rspamd` + `reference-fail2ban` into one traditional mail server. Parameterized by config dir — the same compose file spins up as `mail1`, `mail2`, or anything else by pointing it at a different directory.
+A thin composer that assembles `reference-postfix` + `reference-dovecot` + Postgres + `reference-rspamd` + `reference-fail2ban` into one traditional mail server. Parameterized by config dir — the same Taskfile spins up as `mail1`, `mail2`, or anything else by pointing it at a different directory.
 
-This repo contains **no daemon code and no Dockerfiles**. It's just a `docker-compose.yml`, a `Taskfile.yml`, and per-instance config directories. All the daemon logic lives in the upstream `rest-mail/reference-*` images.
+This repo contains **no daemon code and no Dockerfiles**. It's just a `Taskfile.yml`, per-service task files under `tasks/`, and per-instance config directories. All the daemon logic lives in the upstream `rest-mail/reference-*` images.
 
 Part of the [rest-mail](https://github.com/rest-mail) decomposition.
 
@@ -16,12 +16,16 @@ Part of the [rest-mail](https://github.com/rest-mail) decomposition.
 | `rspamd`   | `ghcr.io/rest-mail/reference-rspamd:2026.04.28`   | spam scoring, DKIM signing           |
 | `fail2ban` | `ghcr.io/rest-mail/reference-fail2ban:2026.04.28` | brute-force protection on auth logs  |
 
+Each service is driven by its own file under `tasks/` (`postgres.yml`, `postfix.yml`, `dovecot.yml`, `rspamd.yml`, `fail2ban.yml`), and each task file wraps a single `docker run` invocation. This mirrors the per-service layout used by `rest-mail/tasks/`.
+
 ## Contract with the testbed
 
 This composer joins `mailnet` as **external**. It does not create the network, does not run dnsmasq, and does not generate TLS certs. Those concerns belong to [`rest-mail/testbed`](https://github.com/rest-mail/testbed):
 
 - `mailnet` (default name `testbed_mailnet`) — bridge network with subnet `10.99.0.0/16`. dnsmasq sits at `10.99.0.10` and resolves `*.test` to peer containers.
 - `certs` (default name `testbed_certs`) — shared volume populated by `reference-certgen` with `mail1.test.crt`, `mail1.test.key`, `mail2.test.crt`, `mail2.test.key`, and the shared CA bundle.
+
+DNS registration with the testbed dnsmasq is handled via the `reference-dnsmasq` image's `render-fragment` subcommand — unchanged from the previous compose-based layout.
 
 If you don't want to depend on the testbed (e.g. you're plugging this into a different substrate), override at run time:
 
@@ -36,46 +40,55 @@ MAILNET_NAME=mynet CERTS_VOLUME=mycerts task up CONFIG=mail1
 git clone https://github.com/rest-mail/testbed.git
 cd testbed && task up
 
-# 2. Bring up one mail server.
+# 2. Bring up one mail server (CONFIG defaults to mail1).
 cd ../reference-mailserver
 task up CONFIG=mail1
 
-# 3. Or both, for the standard pair.
-task pair:up
+# 3. Want a second instance? Run again with a different CONFIG.
+task up CONFIG=mail2
 ```
+
+Each `CONFIG` is independent — bring up as many as you have configs for.
 
 Verify:
 
 ```bash
-task ps CONFIG=mail1
+task ps
 docker run --rm --network testbed_mailnet --dns 10.99.0.10 alpine \
   sh -c 'apk add --no-cache netcat-openbsd >/dev/null && echo QUIT | nc mail1.test 25'
 ```
 
 You should see `220 mail1.test ESMTP ...`.
 
-Tear down:
+Tear down (per instance):
 
 ```bash
-task pair:down       # stop containers, keep volumes
-task pair:destroy    # also drop postgres-data / maildir volumes
+task down CONFIG=mail1       # stop containers, keep volumes
+task destroy CONFIG=mail1    # also drop postgres-data / maildir volumes
 ```
 
 ## Tasks
 
 ```
-task up CONFIG=mail1          # bring up one instance
-task down CONFIG=mail1        # stop one instance
-task destroy CONFIG=mail1     # stop and drop volumes
-task logs CONFIG=mail1 SERVICE=postfix
-task ps CONFIG=mail1
-task config CONFIG=mail1      # render resolved compose file (debug)
-task pair:up                  # mail1 + mail2
-task pair:down
-task pair:destroy
+task up CONFIG=mail1            # bring up one instance (default CONFIG=mail1)
+task down CONFIG=mail1          # stop one instance
+task destroy CONFIG=mail1       # stop and drop volumes
+task ps                         # list containers for the active CONFIG
+task postgres:logs CONFIG=mail1 # per-service logs
+task postfix:logs CONFIG=mail1
+task dovecot:logs CONFIG=mail1
+task rspamd:logs CONFIG=mail1
+task fail2ban:logs CONFIG=mail1
 ```
 
-Each `CONFIG=<name>` invocation uses `COMPOSE_PROJECT_NAME=mailref-<name>`, so `mail1` and `mail2` produce distinct container names, networks-aliases, and named volumes.
+Each `CONFIG=<name>` invocation produces distinct, namespaced resources:
+
+- Containers: `mailref-<config>-<service>` (e.g. `mailref-mail1-postfix`).
+- Volumes: `mailref-<config>-postgres-data` and `mailref-<config>-maildir`.
+
+So `mail1` and `mail2` never collide.
+
+`VERBOSE=1 task <anything>` shows the raw `docker` output for the underlying invocation — handy when debugging argument assembly or container startup.
 
 ## Adding a third instance
 
@@ -92,6 +105,7 @@ No code changes anywhere.
 ```
 configs/<name>/
 ├── env                       # POSTFIX_*, DOVECOT_*, RSPAMD_*, POSTGRES_* vars
+├── dns.env                   # values consumed by reference-dnsmasq render-fragment
 ├── postgres-init/
 │   ├── 01-schema.sql         # virtual users / mailboxes / aliases
 │   └── 02-seed.sql           # initial accounts
@@ -114,7 +128,7 @@ Both example instances seed `password123` for every account.
 
 ## Versioning
 
-Calver, matching the rest-mail org convention. Daemon images are pinned to `:2026.04.28` in `docker-compose.yml`. Bump the tags here in lockstep when the upstream reference images publish a new calver release; do not float on `:latest`.
+Calver, matching the rest-mail org convention. Daemon images are pinned to `:2026.04.28` in the per-service task files under `tasks/`. Bump the tags here in lockstep when the upstream reference images publish a new calver release; do not float on `:latest`.
 
 ## License
 

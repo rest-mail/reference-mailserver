@@ -1,0 +1,109 @@
+version: "3"
+
+# reference-mailserver/tasks/dovecot — Taskfile
+#
+# Drives the dovecot container via plain `docker run` (no compose).
+# Included by the main Taskfile under namespace `dovecot`.
+#
+# Joins the testbed's mailnet network at a static IP so peers can reach it
+# by name. Owns the maildir named volume (mail storage); `reset` is the
+# only destructive task and drops all stored mail.
+#
+# NOTE: in the legacy compose, dovecot and postfix shared 10.99.0.11 because
+# postfix only reaches dovecot by name on mailnet. Two containers cannot
+# share a single docker IP, so dovecot uses .111 here (mail2 dovecot will
+# use .112). Postfix keeps .11.
+#
+# Output is friendly by default. Re-run with VERBOSE=1 to see the raw
+# docker / shell output (e.g. VERBOSE=1 task dovecot:up).
+
+silent: true
+
+vars:
+  PROJECT: '{{.PROJECT | default "mailref-mail1"}}'
+  NETWORK: '{{.NETWORK | default "testbed_mailnet"}}'
+  CERTS_VOLUME: '{{.CERTS_VOLUME | default "testbed_certs"}}'
+  DNS_IP: '{{.DNS_IP | default "10.99.0.10"}}'
+  IP: '{{.IP | default "10.99.0.111"}}'
+  HOSTNAME: '{{.HOSTNAME | default "mail1.test"}}'
+  CONFIG_DIR: '{{.CONFIG_DIR | default "./configs/mail1"}}'
+  IMAGE_TAG: '{{.IMAGE_TAG | default "2026.04.28"}}'
+  IMAGE: '{{.IMAGE | default "ghcr.io/rest-mail/reference-dovecot"}}'
+  CONTAINER_NAME: '{{.PROJECT}}-dovecot'
+  MAILDIR_VOLUME: '{{.PROJECT}}-maildir'
+
+tasks:
+
+  # ════════════════════════════════════════════════════════
+  # up / down / restart
+  # ════════════════════════════════════════════════════════
+
+  up:
+    desc: Start dovecot (creates maildir volume if missing; recreates container)
+    cmds:
+      - |
+        [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
+        if docker volume inspect {{.MAILDIR_VOLUME}} >/dev/null 2>&1; then
+          [ -n "$VERBOSE" ] && echo "  volume {{.MAILDIR_VOLUME}} already exists" || true
+        else
+          echo "  creating volume {{.MAILDIR_VOLUME}}"
+          docker volume create {{.MAILDIR_VOLUME}} >$OUTPUT 2>&1
+        fi
+      - |
+        [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
+        echo "  starting dovecot ({{.CONTAINER_NAME}} @ {{.IP}})"
+        docker rm -f {{.CONTAINER_NAME}} >$OUTPUT 2>&1 || true
+        docker run -d --name {{.CONTAINER_NAME}} \
+          --hostname {{.HOSTNAME}} \
+          --restart unless-stopped \
+          --network {{.NETWORK}} \
+          --ip {{.IP}} \
+          --dns {{.DNS_IP}} \
+          --env-file {{.CONFIG_DIR}}/env \
+          -v {{.CONFIG_DIR}}/dovecot-overlay:/etc/dovecot-overlay:ro \
+          -v {{.CERTS_VOLUME}}:/certs:ro \
+          -v {{.MAILDIR_VOLUME}}:/var/mail/vhosts \
+          {{.IMAGE}}:{{.IMAGE_TAG}} >$OUTPUT 2>&1
+
+  down:
+    desc: Stop and remove dovecot (preserves the maildir volume)
+    cmds:
+      - |
+        [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
+        if docker ps -aq --filter "name=^/{{.CONTAINER_NAME}}$" | grep -q .; then
+          echo "  stopping {{.CONTAINER_NAME}}"
+          docker rm -f {{.CONTAINER_NAME}} >$OUTPUT 2>&1
+        else
+          echo "  {{.CONTAINER_NAME}} not running"
+        fi
+
+  restart:
+    desc: Recreate the dovecot container
+    cmds:
+      - task: down
+      - task: up
+
+  # ════════════════════════════════════════════════════════
+  # Diagnostics
+  # ════════════════════════════════════════════════════════
+
+  logs:
+    desc: Tail dovecot logs
+    cmds:
+      - docker logs -f --tail=100 {{.CONTAINER_NAME}}
+
+  # ════════════════════════════════════════════════════════
+  # Destructive
+  # ════════════════════════════════════════════════════════
+
+  reset:
+    desc: Drop the maildir volume and recreate (destructive — drops all stored mail)
+    cmds:
+      - task: down
+      - |
+        [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
+        if docker volume inspect {{.MAILDIR_VOLUME}} >/dev/null 2>&1; then
+          echo "  removing volume {{.MAILDIR_VOLUME}}"
+          docker volume rm -f {{.MAILDIR_VOLUME}} >$OUTPUT 2>&1
+        fi
+      - task: up

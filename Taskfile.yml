@@ -1,12 +1,19 @@
-version: '3'
+version: "3"
+silent: true
 
-# reference-mailserver Taskfile.
+# reference-mailserver Taskfile (per-service orchestrator).
 #
 # Each `CONFIG=<name>` invocation maps to:
 #   - CONFIG_DIR=./configs/<name>
-#   - COMPOSE_PROJECT_NAME=mailref-<name>
+#   - PROJECT=mailref-<name>
 # so that running `task up CONFIG=mail1` and `task up CONFIG=mail2` produces
-# two completely independent compose projects on the same mailnet network.
+# two completely independent stacks on the same mailnet network.
+#
+# This file composes the per-service Taskfiles in ./tasks/*.yml under their
+# `<svc>:` namespace. Per-instance vars (HOSTNAME, IPs) default to the mail1
+# values; the parent rest-mail Taskfile (or a CLI override) supplies mail2
+# values via include vars. Instances are launched one at a time — each
+# invocation drives a single CONFIG; the user decides how many to run.
 #
 # DNS is registered with the testbed's dnsmasq via the
 # reference-dnsmasq image's `render-fragment` subcommand — the image owns
@@ -16,22 +23,78 @@ vars:
   CONFIG: '{{.CONFIG | default "mail1"}}'
   PROJECT: 'mailref-{{.CONFIG}}'
   CONFIG_DIR: './configs/{{.CONFIG}}'
-  # Defaults assume the rest-mail/testbed substrate is up.
-  # Override these when joining a non-testbed substrate.
+  HOSTNAME: '{{.HOSTNAME | default "mail1.test"}}'
+  # NOTE: HOSTNAME default is a fallback; for mail2 the parent override or
+  # CLI override must set HOSTNAME=mail2.test. The dns.env in each config dir
+  # is the source of truth at the dns:register stage.
+
   MAILNET_NAME: '{{.MAILNET_NAME | default "testbed_mailnet"}}'
   CERTS_VOLUME: '{{.CERTS_VOLUME | default "testbed_certs"}}'
   DNSMASQ_FRAGMENTS_VOLUME: '{{.DNSMASQ_FRAGMENTS_VOLUME | default "testbed_dnsmasq_fragments"}}'
   DNSMASQ_CONTAINER: '{{.DNSMASQ_CONTAINER | default "testbed-dnsmasq"}}'
   DNSMASQ_IMAGE: '{{.DNSMASQ_IMAGE | default "ghcr.io/rest-mail/reference-dnsmasq"}}'
-  DNSMASQ_IMAGE_TAG: '{{.DNSMASQ_IMAGE_TAG | default "2026.04.28"}}'
+  IMAGE_TAG: '{{.IMAGE_TAG | default "2026.04.28"}}'
+  DNS_IP: '{{.DNS_IP | default "10.99.0.10"}}'
 
-env:
-  COMPOSE_PROJECT_NAME: '{{.PROJECT}}'
-  CONFIG_DIR: '{{.CONFIG_DIR}}'
-  MAILNET_NAME: '{{.MAILNET_NAME}}'
-  CERTS_VOLUME: '{{.CERTS_VOLUME}}'
-  DNSMASQ_FRAGMENTS_VOLUME: '{{.DNSMASQ_FRAGMENTS_VOLUME}}'
-  DNSMASQ_CONTAINER: '{{.DNSMASQ_CONTAINER}}'
+  # Per-instance IPs — mail1 defaults from configs/mail1/dns.env. The parent
+  # Taskfile (rest-mail) overrides these for mail2 via include vars.
+  POSTGRES_IP: '{{.POSTGRES_IP | default "10.99.0.41"}}'
+  POSTFIX_IP: '{{.POSTFIX_IP | default "10.99.0.11"}}'
+  DOVECOT_IP: '{{.DOVECOT_IP | default "10.99.0.111"}}'
+  RSPAMD_IP: '{{.RSPAMD_IP | default "10.99.0.13"}}'
+  FAIL2BAN_IP: '{{.FAIL2BAN_IP | default "10.99.0.14"}}'
+
+includes:
+  postgres:
+    taskfile: ./tasks/postgres.yml
+    vars:
+      PROJECT: '{{.PROJECT}}'
+      NETWORK: '{{.MAILNET_NAME}}'
+      IP: '{{.POSTGRES_IP}}'
+      CONFIG_DIR: '{{.CONFIG_DIR}}'
+
+  postfix:
+    taskfile: ./tasks/postfix.yml
+    vars:
+      PROJECT: '{{.PROJECT}}'
+      NETWORK: '{{.MAILNET_NAME}}'
+      CERTS_VOLUME: '{{.CERTS_VOLUME}}'
+      DNS_IP: '{{.DNS_IP}}'
+      IP: '{{.POSTFIX_IP}}'
+      HOSTNAME: '{{.HOSTNAME}}'
+      CONFIG_DIR: '{{.CONFIG_DIR}}'
+      IMAGE_TAG: '{{.IMAGE_TAG}}'
+
+  dovecot:
+    taskfile: ./tasks/dovecot.yml
+    vars:
+      PROJECT: '{{.PROJECT}}'
+      NETWORK: '{{.MAILNET_NAME}}'
+      CERTS_VOLUME: '{{.CERTS_VOLUME}}'
+      DNS_IP: '{{.DNS_IP}}'
+      IP: '{{.DOVECOT_IP}}'
+      HOSTNAME: '{{.HOSTNAME}}'
+      CONFIG_DIR: '{{.CONFIG_DIR}}'
+      IMAGE_TAG: '{{.IMAGE_TAG}}'
+
+  rspamd:
+    taskfile: ./tasks/rspamd.yml
+    vars:
+      PROJECT: '{{.PROJECT}}'
+      NETWORK: '{{.MAILNET_NAME}}'
+      DNS_IP: '{{.DNS_IP}}'
+      IP: '{{.RSPAMD_IP}}'
+      CONFIG_DIR: '{{.CONFIG_DIR}}'
+      IMAGE_TAG: '{{.IMAGE_TAG}}'
+
+  fail2ban:
+    taskfile: ./tasks/fail2ban.yml
+    vars:
+      PROJECT: '{{.PROJECT}}'
+      NETWORK: '{{.MAILNET_NAME}}'
+      IP: '{{.FAIL2BAN_IP}}'
+      CONFIG_DIR: '{{.CONFIG_DIR}}'
+      IMAGE_TAG: '{{.IMAGE_TAG}}'
 
 tasks:
   default:
@@ -43,19 +106,55 @@ tasks:
     desc: Bring up one mail server (CONFIG=mail1|mail2|...)
     cmds:
       - task: dns:register
-      - docker compose up -d
+      - task: postgres:up
+      - |
+        echo "  waiting for postgres to become healthy..."
+        for i in $(seq 1 30); do
+          status=$(docker inspect -f '{{`{{.State.Health.Status}}`}}' {{.PROJECT}}-postgres 2>/dev/null || echo "starting")
+          if [ "$status" = "healthy" ]; then
+            echo "  postgres healthy"
+            break
+          fi
+          sleep 1
+        done
+      - task: postfix:up
+      - task: dovecot:up
+      - task: rspamd:up
+      - task: fail2ban:up
+      - |
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  reference-mailserver ({{.HOSTNAME}}) ready"
+        echo "  project: {{.PROJECT}}"
+        echo ""
+        echo "  task ps CONFIG={{.CONFIG}}                list containers"
+        echo "  task <svc>:logs CONFIG={{.CONFIG}}        tail one service's logs"
+        echo "    (svc = postgres|postfix|dovecot|rspamd|fail2ban)"
+        echo "  task down CONFIG={{.CONFIG}}              stop (preserves volumes)"
+        echo "  task destroy CONFIG={{.CONFIG}}           stop + drop volumes"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   down:
-    desc: Tear down one mail server (CONFIG=mail1|mail2|...)
+    desc: Tear down one mail server (CONFIG=mail1|mail2|...) — preserves volumes
     cmds:
-      - docker compose down
+      - task: fail2ban:down
+      - task: rspamd:down
+      - task: dovecot:down
+      - task: postfix:down
+      - task: postgres:down
       - task: dns:unregister
 
   destroy:
-    desc: Tear down and remove volumes (CONFIG=mail1|mail2|...)
+    desc: Tear down one mail server and remove its volumes (CONFIG=mail1|mail2|...)
     cmds:
-      - docker compose down -v
-      - task: dns:unregister
+      - task: down
+      - |
+        for vol in "{{.PROJECT}}-postgres-data" "{{.PROJECT}}-maildir"; do
+          if docker volume inspect "$vol" >/dev/null 2>&1; then
+            echo "  removing volume $vol"
+            docker volume rm -f "$vol" >/dev/null
+          fi
+        done
 
   dns:register:
     desc: Render this instance's dnsmasq fragment + reload (without bringing up containers)
@@ -64,7 +163,7 @@ tasks:
         docker run --rm \
           -v "{{.DNSMASQ_FRAGMENTS_VOLUME}}:/dst" \
           -v "$(pwd)/{{.CONFIG_DIR}}/dns.env:/env:ro" \
-          {{.DNSMASQ_IMAGE}}:{{.DNSMASQ_IMAGE_TAG}} \
+          {{.DNSMASQ_IMAGE}}:{{.IMAGE_TAG}} \
           render-fragment --name {{.CONFIG}} --project {{.PROJECT}}
       - |
         if docker ps -aq --filter "name=^/{{.DNSMASQ_CONTAINER}}$" | grep -q .; then
@@ -77,53 +176,25 @@ tasks:
       - |
         docker run --rm \
           -v "{{.DNSMASQ_FRAGMENTS_VOLUME}}:/dst" \
-          {{.DNSMASQ_IMAGE}}:{{.DNSMASQ_IMAGE_TAG}} \
+          {{.DNSMASQ_IMAGE}}:{{.IMAGE_TAG}} \
           remove-fragment --name {{.CONFIG}}
       - |
         if docker ps -aq --filter "name=^/{{.DNSMASQ_CONTAINER}}$" | grep -q .; then
           docker restart {{.DNSMASQ_CONTAINER}} >/dev/null
         fi
 
-  logs:
-    desc: Tail logs (CONFIG=mail1|mail2|..., SERVICE=postfix|dovecot|...)
-    cmds:
-      - docker compose logs -f {{.SERVICE}}
-
   ps:
-    desc: List running containers for the named instance
+    desc: List containers for the named instance
     cmds:
-      - docker compose ps
+      - docker ps -a --filter "name=^/{{.PROJECT}}-"
 
-  config:
-    desc: Render the resolved compose config (debug)
+  logs:
+    desc: Print available log commands for this mail server instance
     cmds:
-      - docker compose config
-
-  pair:up:
-    desc: Bring up both mail1 and mail2 instances
-    cmds:
-      - task: up
-        vars: {CONFIG: mail1}
-      - task: up
-        vars: {CONFIG: mail2}
-
-  pair:down:
-    desc: Tear down both mail1 and mail2 instances
-    cmds:
-      - task: down
-        vars: {CONFIG: mail1}
-      - task: down
-        vars: {CONFIG: mail2}
-
-  pair:destroy:
-    desc: Tear down both instances and remove volumes
-    cmds:
-      - task: destroy
-        vars: {CONFIG: mail1}
-      - task: destroy
-        vars: {CONFIG: mail2}
-
-  lint:
-    desc: Validate compose file syntax
-    cmds:
-      - docker compose config -q
+      - |
+        echo "Tail logs for individual services (CONFIG={{.CONFIG}}):"
+        echo "  task postgres:logs CONFIG={{.CONFIG}}"
+        echo "  task postfix:logs CONFIG={{.CONFIG}}"
+        echo "  task dovecot:logs CONFIG={{.CONFIG}}"
+        echo "  task rspamd:logs CONFIG={{.CONFIG}}"
+        echo "  task fail2ban:logs CONFIG={{.CONFIG}}"

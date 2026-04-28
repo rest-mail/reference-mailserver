@@ -1,0 +1,110 @@
+version: "3"
+
+# reference-mailserver/tasks/postgres — Taskfile
+#
+# Drives the postgres container via plain `docker run` (no compose).
+# Included by the main Taskfile under namespace `postgres`.
+#
+# Joins the testbed's mailnet network at a static IP so peers can reach it
+# by name. DB credentials come from the per-instance env file
+# ({{.CONFIG_DIR}}/env), which sets POSTGRES_DB / POSTGRES_USER /
+# POSTGRES_PASSWORD. First-boot SQL is bind-mounted read-only from
+# {{.CONFIG_DIR}}/postgres-init. Data lives in a named volume so the
+# container can be recreated without losing state. `reset` is the only
+# destructive task.
+#
+# Output is friendly by default. Re-run with VERBOSE=1 to see the raw
+# docker / shell output (e.g. VERBOSE=1 task postgres:up).
+
+silent: true
+
+vars:
+  PROJECT: '{{.PROJECT | default "mailref-mail1"}}'
+  NETWORK: '{{.NETWORK | default "testbed_mailnet"}}'
+  IP: '{{.IP | default "10.99.0.41"}}'
+  CONFIG_DIR: '{{.CONFIG_DIR | default "./configs/mail1"}}'
+  IMAGE: '{{.IMAGE | default "postgres:16-alpine"}}'
+  CONTAINER_NAME: '{{.PROJECT}}-postgres'
+  DATA_VOLUME: '{{.PROJECT}}-postgres-data'
+
+tasks:
+
+  # ════════════════════════════════════════════════════════
+  # up / down / restart
+  # ════════════════════════════════════════════════════════
+
+  up:
+    desc: Start postgres (creates data volume if missing; recreates container)
+    cmds:
+      - |
+        [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
+        if docker volume inspect {{.DATA_VOLUME}} >/dev/null 2>&1; then
+          [ -n "$VERBOSE" ] && echo "  volume {{.DATA_VOLUME}} already exists" || true
+        else
+          echo "  creating volume {{.DATA_VOLUME}}"
+          docker volume create {{.DATA_VOLUME}} >$OUTPUT 2>&1
+        fi
+      - |
+        [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
+        echo "  starting postgres ({{.CONTAINER_NAME}} @ {{.IP}})"
+        docker rm -f {{.CONTAINER_NAME}} >$OUTPUT 2>&1 || true
+        docker run -d --name {{.CONTAINER_NAME}} \
+          --restart unless-stopped \
+          --network {{.NETWORK}} \
+          --ip {{.IP}} \
+          --env-file {{.CONFIG_DIR}}/env \
+          -v {{.CONFIG_DIR}}/postgres-init:/docker-entrypoint-initdb.d:ro \
+          -v {{.DATA_VOLUME}}:/var/lib/postgresql/data \
+          --health-cmd 'pg_isready -U "$POSTGRES_USER"' \
+          --health-interval 10s \
+          --health-timeout 5s \
+          --health-retries 10 \
+          {{.IMAGE}} >$OUTPUT 2>&1
+
+  down:
+    desc: Stop and remove postgres (preserves the data volume)
+    cmds:
+      - |
+        [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
+        if docker ps -aq --filter "name=^/{{.CONTAINER_NAME}}$" | grep -q .; then
+          echo "  stopping {{.CONTAINER_NAME}}"
+          docker rm -f {{.CONTAINER_NAME}} >$OUTPUT 2>&1
+        else
+          echo "  {{.CONTAINER_NAME}} not running"
+        fi
+
+  restart:
+    desc: Recreate the postgres container
+    cmds:
+      - task: down
+      - task: up
+
+  # ════════════════════════════════════════════════════════
+  # Diagnostics
+  # ════════════════════════════════════════════════════════
+
+  logs:
+    desc: Tail postgres logs
+    cmds:
+      - docker logs -f --tail=100 {{.CONTAINER_NAME}}
+
+  psql:
+    desc: Open an interactive psql shell inside postgres
+    cmds:
+      - docker exec -it {{.CONTAINER_NAME}} sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+
+  # ════════════════════════════════════════════════════════
+  # Destructive
+  # ════════════════════════════════════════════════════════
+
+  reset:
+    desc: Drop the data volume and recreate the container (destructive — drops all data)
+    cmds:
+      - task: down
+      - |
+        [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
+        if docker volume inspect {{.DATA_VOLUME}} >/dev/null 2>&1; then
+          echo "  removing volume {{.DATA_VOLUME}}"
+          docker volume rm -f {{.DATA_VOLUME}} >$OUTPUT 2>&1
+        fi
+      - task: up
