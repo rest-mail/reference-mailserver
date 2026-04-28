@@ -1,0 +1,43 @@
+# mail2.test instance — env file consumed by every container in this stack.
+# The same file is mounted into postgres, postfix, dovecot, rspamd, fail2ban;
+# each daemon picks up only the variables prefixed for it.
+
+# ── Postfix ─────────────────────────────────────────────────────────────
+POSTFIX_HOSTNAME=mail2.test
+POSTFIX_DOMAIN=mail2.test
+POSTFIX_DB_HOST=postgres
+POSTFIX_DB_PORT=5432
+POSTFIX_DB_NAME=mail
+POSTFIX_DB_USER=mail
+POSTFIX_DB_PASSWORD=mailpass
+POSTFIX_TLS_CERT=/certs/mail2.test.crt
+POSTFIX_TLS_KEY=/certs/mail2.test.key
+POSTFIX_CA_NAME=ref
+POSTFIX_MYNETWORKS=127.0.0.0/8 10.99.0.0/16
+POSTFIX_DOVECOT_HOST=dovecot
+POSTFIX_RSPAMD_HOST=rspamd
+POSTFIX_LOG_LEVEL=info
+
+# ── Dovecot ─────────────────────────────────────────────────────────────
+DOVECOT_HOSTNAME=mail2.test
+DOVECOT_DOMAIN=mail2.test
+DOVECOT_DB_HOST=postgres
+DOVECOT_DB_PORT=5432
+DOVECOT_DB_NAME=mail
+DOVECOT_DB_USER=mail
+DOVECOT_DB_PASSWORD=mailpass
+DOVECOT_TLS_CERT=/certs/mail2.test.crt
+DOVECOT_TLS_KEY=/certs/mail2.test.key
+DOVECOT_LOG_LEVEL=info
+
+# ── rspamd ──────────────────────────────────────────────────────────────
+RSPAMD_HOSTNAME=mail2.test
+RSPAMD_LOG_LEVEL=info
+
+# ── fail2ban ────────────────────────────────────────────────────────────
+FAIL2BAN_LOG_LEVEL=info
+
+# ── Postgres (consumed by the postgres image's official entrypoint) ─────
+POSTGRES_DB=mail
+POSTGRES_USER=mail
+POSTGRES_PASSWORD=mailpass

@@ -1,0 +1,63 @@
+name: lint
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  compose-validate:
+    name: Validate docker-compose.yml for every config dir
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # docker compose is preinstalled on ubuntu-latest runners.
+      - name: Show docker compose version
+        run: docker compose version
+
+      # Pre-create the externals so `docker compose config` can resolve them.
+      # Lint must not require the testbed to actually be running.
+      - name: Create stub mailnet network and certs volume
+        run: |
+          docker network create --driver bridge \
+            --subnet 10.99.0.0/16 testbed_mailnet
+          docker volume create testbed_certs
+
+      - name: Validate every CONFIG dir
+        run: |
+          set -euo pipefail
+          for dir in configs/*/; do
+            name=$(basename "$dir")
+            echo "::group::compose config — $name"
+            COMPOSE_PROJECT_NAME="mailref-$name" CONFIG_DIR="./$dir" \
+              docker compose config -q
+            echo "::endgroup::"
+          done
+
+  yaml-lint:
+    name: yamllint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install yamllint
+        run: pip install --quiet yamllint
+      - name: Run yamllint
+        run: |
+          yamllint -d "{extends: relaxed, rules: {line-length: disable, document-start: disable, truthy: disable}}" \
+            docker-compose.yml Taskfile.yml .github/workflows/
+
+  shellcheck:
+    name: shellcheck (no shell scripts yet, sanity step)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find shell scripts
+        run: |
+          shells=$(find . -type f \( -name '*.sh' -o -name '*.bash' \) \
+            -not -path './.git/*' || true)
+          if [ -z "$shells" ]; then
+            echo "No shell scripts to lint."
+            exit 0
+          fi
+          echo "$shells" | xargs -r shellcheck

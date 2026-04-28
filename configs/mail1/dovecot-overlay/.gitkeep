@@ -1,0 +1,8 @@
+# Per-instance Dovecot overlay for mail1.test.
+#
+# Mounted at /etc/dovecot-overlay; merged on top of the baked-in
+# /etc/dovecot/conf.d/*.conf defaults at startup. Drop *.conf files here to
+# tweak auth, namespaces, plugins, or quota policy for this instance only.
+#
+# Empty by default — defaults shipped with reference-dovecot are enough for
+# the seeded SQL-backed virtual mailboxes.

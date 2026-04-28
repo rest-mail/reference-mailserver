@@ -1,0 +1,89 @@
+version: '3'
+
+# reference-mailserver Taskfile.
+#
+# Each `CONFIG=<name>` invocation maps to:
+#   - CONFIG_DIR=./configs/<name>
+#   - COMPOSE_PROJECT_NAME=mailref-<name>
+# so that running `task up CONFIG=mail1` and `task up CONFIG=mail2` produces
+# two completely independent compose projects on the same mailnet network.
+
+vars:
+  CONFIG: '{{.CONFIG | default "mail1"}}'
+  PROJECT: 'mailref-{{.CONFIG}}'
+  CONFIG_DIR: './configs/{{.CONFIG}}'
+  # Defaults assume the rest-mail/testbed compose project is up.
+  # Override these when joining a non-testbed substrate.
+  MAILNET_NAME: '{{.MAILNET_NAME | default "testbed_mailnet"}}'
+  CERTS_VOLUME: '{{.CERTS_VOLUME | default "testbed_certs"}}'
+
+env:
+  COMPOSE_PROJECT_NAME: '{{.PROJECT}}'
+  CONFIG_DIR: '{{.CONFIG_DIR}}'
+  MAILNET_NAME: '{{.MAILNET_NAME}}'
+  CERTS_VOLUME: '{{.CERTS_VOLUME}}'
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list-all
+
+  up:
+    desc: Bring up one mail server (CONFIG=mail1|mail2|...)
+    cmds:
+      - docker compose up -d
+
+  down:
+    desc: Tear down one mail server (CONFIG=mail1|mail2|...)
+    cmds:
+      - docker compose down
+
+  destroy:
+    desc: Tear down and remove volumes (CONFIG=mail1|mail2|...)
+    cmds:
+      - docker compose down -v
+
+  logs:
+    desc: Tail logs (CONFIG=mail1|mail2|..., SERVICE=postfix|dovecot|...)
+    cmds:
+      - docker compose logs -f {{.SERVICE}}
+
+  ps:
+    desc: List running containers for the named instance
+    cmds:
+      - docker compose ps
+
+  config:
+    desc: Render the resolved compose config (debug)
+    cmds:
+      - docker compose config
+
+  pair:up:
+    desc: Bring up both mail1 and mail2 instances
+    cmds:
+      - task: up
+        vars: {CONFIG: mail1}
+      - task: up
+        vars: {CONFIG: mail2}
+
+  pair:down:
+    desc: Tear down both mail1 and mail2 instances
+    cmds:
+      - task: down
+        vars: {CONFIG: mail1}
+      - task: down
+        vars: {CONFIG: mail2}
+
+  pair:destroy:
+    desc: Tear down both instances and remove volumes
+    cmds:
+      - task: destroy
+        vars: {CONFIG: mail1}
+      - task: destroy
+        vars: {CONFIG: mail2}
+
+  lint:
+    desc: Validate compose file syntax
+    cmds:
+      - docker compose config -q

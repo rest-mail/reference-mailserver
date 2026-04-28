@@ -1,0 +1,7 @@
+# Per-instance rspamd overlay for mail2.test.
+#
+# Mounted at /etc/rspamd-overlay. The reference-rspamd entrypoint uses files
+# here to override modules.d/* and local.d/* before starting. Useful for
+# setting per-instance DKIM keys, custom blacklists, or scoring tweaks.
+#
+# Empty by default.

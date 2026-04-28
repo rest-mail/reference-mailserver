@@ -1,0 +1,7 @@
+# Per-instance fail2ban overlay for mail2.test.
+#
+# Mounted at /etc/fail2ban-overlay. Drop *.local files here to adjust which
+# jails are enabled, ban durations, ignoreip lists, or custom filters for
+# this instance only.
+#
+# Empty by default — the image ships postfix-sasl and dovecot jails enabled.

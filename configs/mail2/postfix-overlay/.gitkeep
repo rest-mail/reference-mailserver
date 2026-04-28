@@ -1,0 +1,13 @@
+# Per-instance Postfix overlay for mail2.test.
+#
+# Files placed in this directory are mounted at /etc/postfix-overlay inside
+# the reference-postfix container. The image's entrypoint merges this on top
+# of its baked-in main.cf / master.cf defaults at startup.
+#
+# Common files to drop here:
+#   main.cf.d/10-relay.cf          additional Postfix parameters
+#   master.cf.d/20-submission.cf   extra master.cf services
+#   sql/virtual-mailbox-maps.cf    custom SQL lookup overrides
+#
+# Empty by default — the published reference-postfix image's defaults are
+# sufficient for the standard traditional-server setup driven by env vars.
