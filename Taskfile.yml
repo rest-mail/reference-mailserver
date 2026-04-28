@@ -7,21 +7,31 @@ version: '3'
 #   - COMPOSE_PROJECT_NAME=mailref-<name>
 # so that running `task up CONFIG=mail1` and `task up CONFIG=mail2` produces
 # two completely independent compose projects on the same mailnet network.
+#
+# DNS is registered with the testbed's dnsmasq via the
+# reference-dnsmasq image's `render-fragment` subcommand — the image owns
+# the rendering logic, the consumer just supplies its dns.env.
 
 vars:
   CONFIG: '{{.CONFIG | default "mail1"}}'
   PROJECT: 'mailref-{{.CONFIG}}'
   CONFIG_DIR: './configs/{{.CONFIG}}'
-  # Defaults assume the rest-mail/testbed compose project is up.
+  # Defaults assume the rest-mail/testbed substrate is up.
   # Override these when joining a non-testbed substrate.
   MAILNET_NAME: '{{.MAILNET_NAME | default "testbed_mailnet"}}'
   CERTS_VOLUME: '{{.CERTS_VOLUME | default "testbed_certs"}}'
+  DNSMASQ_FRAGMENTS_VOLUME: '{{.DNSMASQ_FRAGMENTS_VOLUME | default "testbed_dnsmasq_fragments"}}'
+  DNSMASQ_CONTAINER: '{{.DNSMASQ_CONTAINER | default "testbed-dnsmasq"}}'
+  DNSMASQ_IMAGE: '{{.DNSMASQ_IMAGE | default "ghcr.io/rest-mail/reference-dnsmasq"}}'
+  DNSMASQ_IMAGE_TAG: '{{.DNSMASQ_IMAGE_TAG | default "2026.04.28"}}'
 
 env:
   COMPOSE_PROJECT_NAME: '{{.PROJECT}}'
   CONFIG_DIR: '{{.CONFIG_DIR}}'
   MAILNET_NAME: '{{.MAILNET_NAME}}'
   CERTS_VOLUME: '{{.CERTS_VOLUME}}'
+  DNSMASQ_FRAGMENTS_VOLUME: '{{.DNSMASQ_FRAGMENTS_VOLUME}}'
+  DNSMASQ_CONTAINER: '{{.DNSMASQ_CONTAINER}}'
 
 tasks:
   default:
@@ -32,17 +42,47 @@ tasks:
   up:
     desc: Bring up one mail server (CONFIG=mail1|mail2|...)
     cmds:
+      - task: dns:register
       - docker compose up -d
 
   down:
     desc: Tear down one mail server (CONFIG=mail1|mail2|...)
     cmds:
       - docker compose down
+      - task: dns:unregister
 
   destroy:
     desc: Tear down and remove volumes (CONFIG=mail1|mail2|...)
     cmds:
       - docker compose down -v
+      - task: dns:unregister
+
+  dns:register:
+    desc: Render this instance's dnsmasq fragment + reload (without bringing up containers)
+    cmds:
+      - |
+        docker run --rm \
+          -v "{{.DNSMASQ_FRAGMENTS_VOLUME}}:/dst" \
+          -v "$(pwd)/{{.CONFIG_DIR}}/dns.env:/env:ro" \
+          {{.DNSMASQ_IMAGE}}:{{.DNSMASQ_IMAGE_TAG}} \
+          render-fragment --name {{.CONFIG}} --project {{.PROJECT}}
+      - |
+        if docker ps -aq --filter "name=^/{{.DNSMASQ_CONTAINER}}$" | grep -q .; then
+          docker restart {{.DNSMASQ_CONTAINER}} >/dev/null
+        fi
+
+  dns:unregister:
+    desc: Remove this instance's dnsmasq fragment + reload (without touching containers)
+    cmds:
+      - |
+        docker run --rm \
+          -v "{{.DNSMASQ_FRAGMENTS_VOLUME}}:/dst" \
+          {{.DNSMASQ_IMAGE}}:{{.DNSMASQ_IMAGE_TAG}} \
+          remove-fragment --name {{.CONFIG}}
+      - |
+        if docker ps -aq --filter "name=^/{{.DNSMASQ_CONTAINER}}$" | grep -q .; then
+          docker restart {{.DNSMASQ_CONTAINER}} >/dev/null
+        fi
 
   logs:
     desc: Tail logs (CONFIG=mail1|mail2|..., SERVICE=postfix|dovecot|...)
