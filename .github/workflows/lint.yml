@@ -6,32 +6,25 @@ on:
   pull_request:
 
 jobs:
-  compose-validate:
-    name: Validate docker-compose.yml for every config dir
+  taskfile-validate:
+    name: taskfile syntax
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # docker compose is preinstalled on ubuntu-latest runners.
-      - name: Show docker compose version
-        run: docker compose version
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Pre-create the externals so `docker compose config` can resolve them.
-      # Lint must not require the testbed to actually be running.
-      - name: Create stub mailnet network and certs volume
-        run: |
-          docker network create --driver bridge \
-            --subnet 10.99.0.0/16 testbed_mailnet
-          docker volume create testbed_certs
-
-      - name: Validate every CONFIG dir
+      - name: Validate Taskfile.yml + each tasks/*.yml
         run: |
           set -euo pipefail
-          for dir in configs/*/; do
-            name=$(basename "$dir")
-            echo "::group::compose config — $name"
-            COMPOSE_PROJECT_NAME="mailref-$name" CONFIG_DIR="./$dir" \
-              docker compose config -q
+          task --list-all
+          for f in tasks/*.yml; do
+            echo "::group::task --list -t $f"
+            task --list -t "$f"
             echo "::endgroup::"
           done
 
@@ -45,10 +38,10 @@ jobs:
       - name: Run yamllint
         run: |
           yamllint -d "{extends: relaxed, rules: {line-length: disable, document-start: disable, truthy: disable}}" \
-            docker-compose.yml Taskfile.yml .github/workflows/
+            Taskfile.yml tasks/ .github/workflows/
 
   shellcheck:
-    name: shellcheck (no shell scripts yet, sanity step)
+    name: shellcheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
