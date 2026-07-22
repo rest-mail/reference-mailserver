@@ -32,6 +32,9 @@ Versioning is calver: `YYYY.MM.DD`, with a `.N` suffix for multiple releases on 
     `POSTFIX_MILTERS` filters through rspamd — replacing the never-consumed
     `POSTFIX_DOVECOT_HOST`/`POSTFIX_RSPAMD_HOST` stubs.
   - Verified end-to-end: SMTP receipt → LMTP → Dovecot maildir → IMAP retrieval.
+  - `POSTFIX_IMAGE_TAG` pins reference-postfix to `2026.07.22` (the calver that
+    ships the DB maps + flow wiring), independent of the shared `IMAGE_TAG` the
+    other reference images still use.
 
 ## [2026.04.28] — Initial release
 
