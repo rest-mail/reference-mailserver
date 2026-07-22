@@ -44,6 +44,19 @@ vars:
   RSPAMD_IP: '{{.RSPAMD_IP | default "10.99.0.13"}}'
   FAIL2BAN_IP: '{{.FAIL2BAN_IP | default "10.99.0.14"}}'
 
+  # Per-service images. These MUST be uniquely named and passed explicitly to
+  # each include below (see IMAGE: lines). Every tasks/*.yml declares a var
+  # named `IMAGE`; Task flattens all included taskfiles' vars into one shared
+  # namespace, so a bare `IMAGE` collides across the five services and one
+  # image wins for all of them. Binding IMAGE per include (like IP) pins each
+  # service to its own image. IMAGE_TAG is appended by the postfix/dovecot/
+  # rspamd/fail2ban tasks; the postgres task uses IMAGE verbatim.
+  POSTGRES_IMAGE: '{{.POSTGRES_IMAGE | default "postgres:16-alpine"}}'
+  POSTFIX_IMAGE: '{{.POSTFIX_IMAGE | default "ghcr.io/rest-mail/reference-postfix"}}'
+  DOVECOT_IMAGE: '{{.DOVECOT_IMAGE | default "ghcr.io/rest-mail/reference-dovecot"}}'
+  RSPAMD_IMAGE: '{{.RSPAMD_IMAGE | default "ghcr.io/rest-mail/reference-rspamd"}}'
+  FAIL2BAN_IMAGE: '{{.FAIL2BAN_IMAGE | default "ghcr.io/rest-mail/reference-fail2ban"}}'
+
 includes:
   postgres:
     taskfile: ./tasks/postgres.yml
@@ -52,6 +65,7 @@ includes:
       NETWORK: '{{.MAILNET_NAME}}'
       IP: '{{.POSTGRES_IP}}'
       CONFIG_DIR: '{{.CONFIG_DIR}}'
+      IMAGE: '{{.POSTGRES_IMAGE}}'
 
   postfix:
     taskfile: ./tasks/postfix.yml
@@ -63,6 +77,7 @@ includes:
       IP: '{{.POSTFIX_IP}}'
       HOSTNAME: '{{.HOSTNAME}}'
       CONFIG_DIR: '{{.CONFIG_DIR}}'
+      IMAGE: '{{.POSTFIX_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
   dovecot:
@@ -75,6 +90,7 @@ includes:
       IP: '{{.DOVECOT_IP}}'
       HOSTNAME: '{{.HOSTNAME}}'
       CONFIG_DIR: '{{.CONFIG_DIR}}'
+      IMAGE: '{{.DOVECOT_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
   rspamd:
@@ -85,6 +101,7 @@ includes:
       DNS_IP: '{{.DNS_IP}}'
       IP: '{{.RSPAMD_IP}}'
       CONFIG_DIR: '{{.CONFIG_DIR}}'
+      IMAGE: '{{.RSPAMD_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
   fail2ban:
@@ -94,6 +111,7 @@ includes:
       NETWORK: '{{.MAILNET_NAME}}'
       IP: '{{.FAIL2BAN_IP}}'
       CONFIG_DIR: '{{.CONFIG_DIR}}'
+      IMAGE: '{{.FAIL2BAN_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
 tasks:

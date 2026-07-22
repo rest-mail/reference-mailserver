@@ -5,6 +5,17 @@ Versioning is calver: `YYYY.MM.DD`, with a `.N` suffix for multiple releases on 
 
 ## [Unreleased]
 
+### Fixed
+- **Every service launched on the same (wrong) image.** Each `tasks/<svc>.yml`
+  declared a self-referencing `IMAGE` var; Task flattens all included taskfiles'
+  vars into one shared namespace, so the five `IMAGE` defaults collided and a
+  single image ran for all services (`postgres`/`dovecot`/`rspamd`/`fail2ban`
+  came up as `postfix` or `fail2ban` depending on load order — postgres had no
+  `pg_isready`, postfix had no DB, etc.). Images are now bound per include via
+  uniquely-named `POSTGRES_IMAGE`/`POSTFIX_IMAGE`/`DOVECOT_IMAGE`/`RSPAMD_IMAGE`/
+  `FAIL2BAN_IMAGE` vars, mirroring how per-service `IP`s are already passed.
+  Regression from `448ce6d` (per-service `tasks/*.yml` split).
+
 ## [2026.04.28] — Initial release
 
 ### Added
