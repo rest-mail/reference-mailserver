@@ -57,6 +57,12 @@ vars:
   RSPAMD_IMAGE: '{{.RSPAMD_IMAGE | default "ghcr.io/rest-mail/reference-rspamd"}}'
   FAIL2BAN_IMAGE: '{{.FAIL2BAN_IMAGE | default "ghcr.io/rest-mail/reference-fail2ban"}}'
 
+  # Per-service image tags. Most images share IMAGE_TAG, but reference-postfix
+  # is pinned ahead: its DB-driven virtual maps + env-gated transport/sasl/milter
+  # (required for actual delivery) shipped in a newer calver than the others.
+  # Override per service so the rest stay on IMAGE_TAG until they roll forward.
+  POSTFIX_IMAGE_TAG: '{{.POSTFIX_IMAGE_TAG | default "2026.07.22"}}'
+
 includes:
   postgres:
     taskfile: ./tasks/postgres.yml
@@ -78,7 +84,7 @@ includes:
       HOSTNAME: '{{.HOSTNAME}}'
       CONFIG_DIR: '{{.CONFIG_DIR}}'
       IMAGE: '{{.POSTFIX_IMAGE}}'
-      IMAGE_TAG: '{{.IMAGE_TAG}}'
+      IMAGE_TAG: '{{.POSTFIX_IMAGE_TAG}}'
 
   dovecot:
     taskfile: ./tasks/dovecot.yml

@@ -15,6 +15,26 @@ Versioning is calver: `YYYY.MM.DD`, with a `.N` suffix for multiple releases on 
   uniquely-named `POSTGRES_IMAGE`/`POSTFIX_IMAGE`/`DOVECOT_IMAGE`/`RSPAMD_IMAGE`/
   `FAIL2BAN_IMAGE` vars, mirroring how per-service `IP`s are already passed.
   Regression from `448ce6d` (per-service `tasks/*.yml` split).
+- rspamd container reported `unhealthy` forever — the image's baked healthcheck
+  shells out to `curl`, which it doesn't ship. The rspamd task now overrides it
+  with `rspamc stat`.
+
+### Changed
+- **Reference mail servers now actually deliver mail.** With the completed
+  reference-postfix image, the per-instance env (`configs/mail1`, `configs/mail2`)
+  is wired for the full Postfix+Dovecot(+rspamd) topology:
+  - `POSTFIX_DB_HOST` / `DOVECOT_DB_HOST` point at the instance's postgres
+    container (`mailref-<config>-postgres`) instead of the unresolvable bare
+    `postgres` — all instances share one mailnet, so the container name is the
+    stable address.
+  - `POSTFIX_VIRTUAL_TRANSPORT=lmtp:inet:<config>-dovecot:24` hands delivery to
+    Dovecot LMTP; `POSTFIX_SASL_PATH` authenticates submission against Dovecot;
+    `POSTFIX_MILTERS` filters through rspamd — replacing the never-consumed
+    `POSTFIX_DOVECOT_HOST`/`POSTFIX_RSPAMD_HOST` stubs.
+  - Verified end-to-end: SMTP receipt → LMTP → Dovecot maildir → IMAP retrieval.
+  - `POSTFIX_IMAGE_TAG` pins reference-postfix to `2026.07.22` (the calver that
+    ships the DB maps + flow wiring), independent of the shared `IMAGE_TAG` the
+    other reference images still use.
 
 ## [2026.04.28] — Initial release
 
