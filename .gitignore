@@ -6,3 +6,6 @@
 .env
 .env.*
 !configs/*/env
+
+# DKIM private keys are provisioned at runtime by `task dkim:provision`.
+configs/*/rspamd-overlay/dkim/

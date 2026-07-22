@@ -211,6 +211,58 @@ tasks:
           docker restart {{.DNSMASQ_CONTAINER}} >/dev/null
         fi
 
+  dkim:provision:
+    desc: 'Provision DKIM signing for CONFIG (fresh keygen -> rspamd overlay + testbed DNS TXT). SELECTOR=mail DKIM_BITS=2048'
+    vars:
+      SELECTOR: '{{.SELECTOR | default "mail"}}'
+      DKIM_BITS: '{{.DKIM_BITS | default "2048"}}'
+    cmds:
+      - |
+        set -e
+        CONFIG_DIR="./configs/{{.CONFIG}}"
+        # Domain: dns.env MAIL_HOSTNAME is the source of truth (HOSTNAME is the fallback).
+        DOMAIN=$( . "$CONFIG_DIR/dns.env" 2>/dev/null; echo "${MAIL_HOSTNAME:-{{.HOSTNAME}}}" )
+        [ -n "$DOMAIN" ] || { echo "  dkim:provision: no domain for {{.CONFIG}}"; exit 1; }
+        SEL="{{.SELECTOR}}"
+        KEYDIR="$CONFIG_DIR/rspamd-overlay/dkim"
+        mkdir -p "$KEYDIR"
+
+        # 1. Fresh keypair. rspamadm writes the private key into the host-mounted
+        # overlay (as root, so it can write the bind mount) and prints the
+        # public-key DNS record to stdout. Key + record are generated together,
+        # so re-provisioning rotates the key AND republishes the matching record.
+        RECORD_FILE="$(mktemp)"
+        # --entrypoint rspamadm: the image's entrypoint execs the daemon, so a
+        # bare CMD would never reach rspamadm. --user root: the image runs as
+        # _rspamd, which can't write the host-mounted key dir.
+        docker run --rm --user root \
+          -v "$(pwd)/$KEYDIR:/keys" \
+          --entrypoint rspamadm \
+          "{{.RSPAMD_IMAGE}}:{{.IMAGE_TAG}}" \
+          dkim_keygen -s "$SEL" -d "$DOMAIN" -b {{.DKIM_BITS}} -k "/keys/$DOMAIN.$SEL.key" \
+          > "$RECORD_FILE" 2>/dev/null
+        chmod 644 "$KEYDIR/$DOMAIN.$SEL.key"
+
+        # 2. Render the dnsmasq TXT fragment: concatenate rspamadm's quoted
+        # record chunks into a single txt-record and publish it to the shared
+        # fragments volume, then reload dnsmasq (same mechanism as dns:register).
+        VALUE=$(grep -o '"[^"]*"' "$RECORD_FILE" | paste -sd, -)
+        FRAG_DIR="$(mktemp -d)"
+        echo "txt-record=$SEL._domainkey.$DOMAIN,$VALUE" > "$FRAG_DIR/11-{{.CONFIG}}-dkim.conf"
+        docker run --rm \
+          -v "$FRAG_DIR:/src:ro" \
+          -v "{{.DNSMASQ_FRAGMENTS_VOLUME}}:/dst" \
+          alpine:3.20 cp "/src/11-{{.CONFIG}}-dkim.conf" "/dst/11-{{.CONFIG}}-dkim.conf"
+        rm -rf "$FRAG_DIR" "$RECORD_FILE"
+        if docker ps -aq --filter "name=^/{{.DNSMASQ_CONTAINER}}$" | grep -q .; then
+          docker restart {{.DNSMASQ_CONTAINER}} >/dev/null
+        fi
+
+        # 3. Reload rspamd so it copies the new overlay (key + dkim_signing.conf)
+        # into local.d and starts signing. No-op if the instance isn't up yet.
+        docker restart mailref-{{.CONFIG}}-rspamd >/dev/null 2>&1 || true
+        echo "  DKIM provisioned: $SEL._domainkey.$DOMAIN (rspamd signs for $DOMAIN)"
+
   ps:
     desc: List containers for the named instance
     cmds:

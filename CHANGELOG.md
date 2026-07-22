@@ -5,6 +5,17 @@ Versioning is calver: `YYYY.MM.DD`, with a `.N` suffix for multiple releases on 
 
 ## [Unreleased]
 
+### Added
+- **DKIM signing provisioning** (`task dkim:provision CONFIG=<name>`). Generates
+  an RSA keypair via `rspamadm dkim_keygen`, installs the private key into the
+  instance's `rspamd-overlay/dkim/` (loaded into rspamd's `dkim_signing`
+  module), and publishes the matching public key to the testbed DNS as a
+  `<selector>._domainkey.<domain>` TXT fragment — so the instance signs its
+  outbound mail and receivers can verify it. `SELECTOR` (default `mail`) and
+  `DKIM_BITS` (default `2048`) are overridable. Mirrors rest-mail's
+  `instance:dkim`. A static `dkim_signing.conf` ships per instance; the private
+  key is a runtime artifact (git-ignored).
+
 ### Changed
 - **The testbed dnsmasq is now the mail daemons' only resolver.** postfix,
   dovecot, and rspamd mount `configs/<name>/resolv.conf` (nameserver
