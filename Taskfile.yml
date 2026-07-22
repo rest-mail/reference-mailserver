@@ -21,8 +21,12 @@ silent: true
 
 vars:
   CONFIG: '{{.CONFIG | default "mail1"}}'
-  PROJECT: 'mailref-{{.CONFIG}}'
-  CONFIG_DIR: './configs/{{.CONFIG}}'
+  # NOTE: there are deliberately NO derived PROJECT/CONFIG_DIR globals. A
+  # global defined in terms of another var (PROJECT: mailref-<CONFIG>) compiles
+  # against CONFIG's DEFAULT, not a CLI-supplied CONFIG=<name> — so
+  # `task up CONFIG=mail2` silently drove project mailref-mail1 and hijacked
+  # mail1's containers with mail2's config. Every use site now inlines the
+  # mailref-<CONFIG> / ./configs/<CONFIG> templates, which DO see the CLI value.
   HOSTNAME: '{{.HOSTNAME | default "mail1.test"}}'
   # NOTE: HOSTNAME default is a fallback; for mail2 the parent override or
   # CLI override must set HOSTNAME=mail2.test. The dns.env in each config dir
@@ -70,53 +74,53 @@ includes:
   postgres:
     taskfile: ./tasks/postgres.yml
     vars:
-      PROJECT: '{{.PROJECT}}'
+      PROJECT: 'mailref-{{.CONFIG}}'
       NETWORK: '{{.MAILNET_NAME}}'
       IP: '{{.POSTGRES_IP}}'
-      CONFIG_DIR: '{{.CONFIG_DIR}}'
+      CONFIG_DIR: './configs/{{.CONFIG}}'
       IMAGE: '{{.POSTGRES_IMAGE}}'
 
   postfix:
     taskfile: ./tasks/postfix.yml
     vars:
-      PROJECT: '{{.PROJECT}}'
+      PROJECT: 'mailref-{{.CONFIG}}'
       NETWORK: '{{.MAILNET_NAME}}'
       CERTS_VOLUME: '{{.CERTS_VOLUME}}'
       IP: '{{.POSTFIX_IP}}'
       HOSTNAME: '{{.HOSTNAME}}'
-      CONFIG_DIR: '{{.CONFIG_DIR}}'
+      CONFIG_DIR: './configs/{{.CONFIG}}'
       IMAGE: '{{.POSTFIX_IMAGE}}'
       IMAGE_TAG: '{{.POSTFIX_IMAGE_TAG}}'
 
   dovecot:
     taskfile: ./tasks/dovecot.yml
     vars:
-      PROJECT: '{{.PROJECT}}'
+      PROJECT: 'mailref-{{.CONFIG}}'
       NETWORK: '{{.MAILNET_NAME}}'
       CERTS_VOLUME: '{{.CERTS_VOLUME}}'
       IP: '{{.DOVECOT_IP}}'
       HOSTNAME: '{{.HOSTNAME}}'
-      CONFIG_DIR: '{{.CONFIG_DIR}}'
+      CONFIG_DIR: './configs/{{.CONFIG}}'
       IMAGE: '{{.DOVECOT_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
   rspamd:
     taskfile: ./tasks/rspamd.yml
     vars:
-      PROJECT: '{{.PROJECT}}'
+      PROJECT: 'mailref-{{.CONFIG}}'
       NETWORK: '{{.MAILNET_NAME}}'
       IP: '{{.RSPAMD_IP}}'
-      CONFIG_DIR: '{{.CONFIG_DIR}}'
+      CONFIG_DIR: './configs/{{.CONFIG}}'
       IMAGE: '{{.RSPAMD_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
   fail2ban:
     taskfile: ./tasks/fail2ban.yml
     vars:
-      PROJECT: '{{.PROJECT}}'
+      PROJECT: 'mailref-{{.CONFIG}}'
       NETWORK: '{{.MAILNET_NAME}}'
       IP: '{{.FAIL2BAN_IP}}'
-      CONFIG_DIR: '{{.CONFIG_DIR}}'
+      CONFIG_DIR: './configs/{{.CONFIG}}'
       IMAGE: '{{.FAIL2BAN_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
@@ -134,7 +138,7 @@ tasks:
       - |
         echo "  waiting for postgres to become healthy..."
         for i in $(seq 1 30); do
-          status=$(docker inspect -f '{{`{{.State.Health.Status}}`}}' {{.PROJECT}}-postgres 2>/dev/null || echo "starting")
+          status=$(docker inspect -f '{{`{{.State.Health.Status}}`}}' mailref-{{.CONFIG}}-postgres 2>/dev/null || echo "starting")
           if [ "$status" = "healthy" ]; then
             echo "  postgres healthy"
             break
@@ -149,7 +153,7 @@ tasks:
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "  reference-mailserver ({{.HOSTNAME}}) ready"
-        echo "  project: {{.PROJECT}}"
+        echo "  project: mailref-{{.CONFIG}}"
         echo ""
         echo "  task ps CONFIG={{.CONFIG}}                list containers"
         echo "  task <svc>:logs CONFIG={{.CONFIG}}        tail one service's logs"
@@ -173,7 +177,7 @@ tasks:
     cmds:
       - task: down
       - |
-        for vol in "{{.PROJECT}}-postgres-data" "{{.PROJECT}}-maildir"; do
+        for vol in "mailref-{{.CONFIG}}-postgres-data" "mailref-{{.CONFIG}}-maildir"; do
           if docker volume inspect "$vol" >/dev/null 2>&1; then
             echo "  removing volume $vol"
             docker volume rm -f "$vol" >/dev/null
@@ -186,9 +190,9 @@ tasks:
       - |
         docker run --rm \
           -v "{{.DNSMASQ_FRAGMENTS_VOLUME}}:/dst" \
-          -v "$(pwd)/{{.CONFIG_DIR}}/dns.env:/env:ro" \
+          -v "$(pwd)/./configs/{{.CONFIG}}/dns.env:/env:ro" \
           {{.DNSMASQ_IMAGE}}:{{.IMAGE_TAG}} \
-          render-fragment --name {{.CONFIG}} --project {{.PROJECT}}
+          render-fragment --name {{.CONFIG}} --project mailref-{{.CONFIG}}
       - |
         if docker ps -aq --filter "name=^/{{.DNSMASQ_CONTAINER}}$" | grep -q .; then
           docker restart {{.DNSMASQ_CONTAINER}} >/dev/null
@@ -210,7 +214,7 @@ tasks:
   ps:
     desc: List containers for the named instance
     cmds:
-      - docker ps -a --filter "name=^/{{.PROJECT}}-"
+      - docker ps -a --filter "name=^/mailref-{{.CONFIG}}-"
 
   logs:
     desc: Print available log commands for this mail server instance
