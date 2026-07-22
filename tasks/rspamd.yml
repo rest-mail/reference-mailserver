@@ -16,8 +16,7 @@ silent: true
 vars:
   PROJECT: '{{.PROJECT | default "mailref-mail1"}}'
   NETWORK: '{{.NETWORK | default "testbed_mailnet"}}'
-  DNS_IP: '{{.DNS_IP | default "10.99.0.10"}}'
-  IP: '{{.IP | default "10.99.0.13"}}'
+  IP: '{{.IP | default "10.99.0.17"}}'
   CONFIG_DIR: '{{.CONFIG_DIR | default "./configs/mail1"}}'
   IMAGE_TAG: '{{.IMAGE_TAG | default "2026.04.28"}}'
   IMAGE: '{{.IMAGE | default "ghcr.io/rest-mail/reference-rspamd"}}'
@@ -40,7 +39,7 @@ tasks:
           --restart unless-stopped \
           --network {{.NETWORK}} \
           --ip {{.IP}} \
-          --dns {{.DNS_IP}} \
+          -v {{.CONFIG_DIR}}/resolv.conf:/etc/resolv.conf:ro \
           --env-file {{.CONFIG_DIR}}/env \
           -v {{.CONFIG_DIR}}/rspamd-overlay:/etc/rspamd-overlay:ro \
           --health-cmd 'rspamc stat >/dev/null 2>&1 || exit 1' \
