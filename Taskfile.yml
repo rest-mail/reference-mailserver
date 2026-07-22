@@ -34,14 +34,17 @@ vars:
   DNSMASQ_CONTAINER: '{{.DNSMASQ_CONTAINER | default "testbed-dnsmasq"}}'
   DNSMASQ_IMAGE: '{{.DNSMASQ_IMAGE | default "ghcr.io/rest-mail/reference-dnsmasq"}}'
   IMAGE_TAG: '{{.IMAGE_TAG | default "2026.04.28"}}'
-  DNS_IP: '{{.DNS_IP | default "10.99.0.10"}}'
 
   # Per-instance IPs — mail1 defaults from configs/mail1/dns.env. The parent
   # Taskfile (rest-mail) overrides these for mail2 via include vars.
   POSTGRES_IP: '{{.POSTGRES_IP | default "10.99.0.41"}}'
   POSTFIX_IP: '{{.POSTFIX_IP | default "10.99.0.11"}}'
   DOVECOT_IP: '{{.DOVECOT_IP | default "10.99.0.111"}}'
-  RSPAMD_IP: '{{.RSPAMD_IP | default "10.99.0.13"}}'
+  # NOT .13: that collides with restmail.test's SMTP gateway (the ex-mail3
+  # low block uses .13/.15/.16), and the reference instances must coexist
+  # with it on the same mailnet. configs/mail1/env pins the milter endpoint
+  # to this address — keep them in sync.
+  RSPAMD_IP: '{{.RSPAMD_IP | default "10.99.0.17"}}'
   FAIL2BAN_IP: '{{.FAIL2BAN_IP | default "10.99.0.14"}}'
 
   # Per-service images. These MUST be uniquely named and passed explicitly to
@@ -79,7 +82,6 @@ includes:
       PROJECT: '{{.PROJECT}}'
       NETWORK: '{{.MAILNET_NAME}}'
       CERTS_VOLUME: '{{.CERTS_VOLUME}}'
-      DNS_IP: '{{.DNS_IP}}'
       IP: '{{.POSTFIX_IP}}'
       HOSTNAME: '{{.HOSTNAME}}'
       CONFIG_DIR: '{{.CONFIG_DIR}}'
@@ -92,7 +94,6 @@ includes:
       PROJECT: '{{.PROJECT}}'
       NETWORK: '{{.MAILNET_NAME}}'
       CERTS_VOLUME: '{{.CERTS_VOLUME}}'
-      DNS_IP: '{{.DNS_IP}}'
       IP: '{{.DOVECOT_IP}}'
       HOSTNAME: '{{.HOSTNAME}}'
       CONFIG_DIR: '{{.CONFIG_DIR}}'
@@ -104,7 +105,6 @@ includes:
     vars:
       PROJECT: '{{.PROJECT}}'
       NETWORK: '{{.MAILNET_NAME}}'
-      DNS_IP: '{{.DNS_IP}}'
       IP: '{{.RSPAMD_IP}}'
       CONFIG_DIR: '{{.CONFIG_DIR}}'
       IMAGE: '{{.RSPAMD_IMAGE}}'

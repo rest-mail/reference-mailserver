@@ -3,12 +3,14 @@
 # each daemon picks up only the variables prefixed for it.
 
 # ── Postfix ─────────────────────────────────────────────────────────────
-# Peer hosts are addressed by container name (PROJECT-<svc>, PROJECT=mailref-mail1).
-# All services share one mailnet, so a bare alias like "postgres" would be
-# ambiguous across instances — the fully-qualified container name is stable.
+# Peer services are addressed by their static mailnet IPs (the same ones the
+# Taskfile pins containers to). Intra-stack plumbing deliberately does NOT use
+# DNS: the daemons' resolv.conf points solely at the testbed dnsmasq, which
+# serves only the simulated internet (*.test A/MX/TXT/PTR) — infra wiring is
+# infra, and stays out of the simulated zone.
 POSTFIX_HOSTNAME=mail1.test
 POSTFIX_DOMAIN=mail1.test
-POSTFIX_DB_HOST=mailref-mail1-postgres
+POSTFIX_DB_HOST=10.99.0.41
 POSTFIX_DB_PORT=5432
 POSTFIX_DB_NAME=mail
 POSTFIX_DB_USER=mail
@@ -19,15 +21,15 @@ POSTFIX_CA_NAME=ref
 POSTFIX_MYNETWORKS=127.0.0.0/8 10.99.0.0/16
 # Full Postfix+Dovecot(+rspamd) topology: hand delivery to Dovecot LMTP,
 # authenticate submission against Dovecot, filter through rspamd.
-POSTFIX_VIRTUAL_TRANSPORT=lmtp:inet:mailref-mail1-dovecot:24
-POSTFIX_SASL_PATH=inet:mailref-mail1-dovecot:12345
-POSTFIX_MILTERS=inet:mailref-mail1-rspamd:11332
+POSTFIX_VIRTUAL_TRANSPORT=lmtp:inet:10.99.0.111:24
+POSTFIX_SASL_PATH=inet:10.99.0.111:12345
+POSTFIX_MILTERS=inet:10.99.0.17:11332
 POSTFIX_LOG_LEVEL=info
 
 # ── Dovecot ─────────────────────────────────────────────────────────────
 DOVECOT_HOSTNAME=mail1.test
 DOVECOT_DOMAIN=mail1.test
-DOVECOT_DB_HOST=mailref-mail1-postgres
+DOVECOT_DB_HOST=10.99.0.41
 DOVECOT_DB_PORT=5432
 DOVECOT_DB_NAME=mail
 DOVECOT_DB_USER=mail

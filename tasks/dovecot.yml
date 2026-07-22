@@ -23,7 +23,6 @@ vars:
   PROJECT: '{{.PROJECT | default "mailref-mail1"}}'
   NETWORK: '{{.NETWORK | default "testbed_mailnet"}}'
   CERTS_VOLUME: '{{.CERTS_VOLUME | default "testbed_certs"}}'
-  DNS_IP: '{{.DNS_IP | default "10.99.0.10"}}'
   IP: '{{.IP | default "10.99.0.111"}}'
   HOSTNAME: '{{.HOSTNAME | default "mail1.test"}}'
   CONFIG_DIR: '{{.CONFIG_DIR | default "./configs/mail1"}}'
@@ -58,7 +57,7 @@ tasks:
           --restart unless-stopped \
           --network {{.NETWORK}} \
           --ip {{.IP}} \
-          --dns {{.DNS_IP}} \
+          -v {{.CONFIG_DIR}}/resolv.conf:/etc/resolv.conf:ro \
           --env-file {{.CONFIG_DIR}}/env \
           -v {{.CONFIG_DIR}}/dovecot-overlay:/etc/dovecot-overlay:ro \
           -v {{.CERTS_VOLUME}}:/certs:ro \

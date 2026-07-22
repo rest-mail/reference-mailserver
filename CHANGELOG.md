@@ -5,6 +5,21 @@ Versioning is calver: `YYYY.MM.DD`, with a `.N` suffix for multiple releases on 
 
 ## [Unreleased]
 
+### Changed
+- **The testbed dnsmasq is now the mail daemons' only resolver.** postfix,
+  dovecot, and rspamd mount `configs/<name>/resolv.conf` (nameserver
+  10.99.0.10) over `/etc/resolv.conf`, bypassing Docker's embedded DNS —
+  which otherwise answers ahead of dnsmasq for any name matching a container
+  hostname (A-records only: no MX, wrong multi-IP answers for bare domains,
+  container names instead of ptr-records). Mail daemons now see the simulated
+  internet faithfully, including reverse DNS. Consequently all intra-stack
+  wiring in `env` (DB host, LMTP transport, SASL backend, milter) uses the
+  services' static mailnet IPs — container names are no longer resolvable
+  from the daemons, and infra names stay out of the simulated DNS zone.
+- rspamd's default IP moved `10.99.0.13` → `10.99.0.17`: `.13` collides with
+  restmail.test's SMTP gateway (the ex-mail3 low block), and the reference
+  instances must coexist with it on the shared mailnet.
+
 ### Fixed
 - **Every service launched on the same (wrong) image.** Each `tasks/<svc>.yml`
   declared a self-referencing `IMAGE` var; Task flattens all included taskfiles'
