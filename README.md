@@ -11,8 +11,8 @@ Part of the [rest-mail](https://github.com/rest-mail) decomposition.
 | Service    | Image                                        | Purpose                              |
 | ---------- | -------------------------------------------- | ------------------------------------ |
 | `postgres` | `postgres:16-alpine`                         | virtual users, mailboxes, aliases    |
-| `postfix`  | `ghcr.io/rest-mail/reference-postfix:2026.04.28`  | SMTP MTA on 25/465/587               |
-| `dovecot`  | `ghcr.io/rest-mail/reference-dovecot:2026.04.28`  | IMAP/POP3 + LMTP delivery            |
+| `postfix`  | `ghcr.io/rest-mail/reference-postfix:0.1.0`       | SMTP MTA on 25/465/587               |
+| `dovecot`  | `ghcr.io/rest-mail/reference-dovecot:0.1.0`       | IMAP/POP3 + LMTP delivery            |
 | `rspamd`   | `ghcr.io/rest-mail/reference-rspamd:2026.04.28`   | spam scoring, DKIM signing           |
 | `fail2ban` | `ghcr.io/rest-mail/reference-fail2ban:2026.04.28` | brute-force protection on auth logs  |
 
@@ -128,7 +128,7 @@ Both example instances seed `password123` for every account.
 
 ## Versioning
 
-Calver, matching the rest-mail org convention. Daemon images are pinned to `:2026.04.28` in the per-service task files under `tasks/`. Bump the tags here in lockstep when the upstream reference images publish a new calver release; do not float on `:latest`.
+SemVer, matching the rest-mail org convention. Daemon images are pinned to `:0.1.0` in the per-service task files under `tasks/`. Bump the tags here in lockstep when the reference images publish a new release; do not float on `:latest`.
 
 ## License
 
