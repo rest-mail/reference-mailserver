@@ -64,10 +64,9 @@ vars:
   RSPAMD_IMAGE: '{{.RSPAMD_IMAGE | default "ghcr.io/rest-mail/reference-rspamd"}}'
   FAIL2BAN_IMAGE: '{{.FAIL2BAN_IMAGE | default "ghcr.io/rest-mail/reference-fail2ban"}}'
 
-  # Per-service image tags. Most images share IMAGE_TAG, but reference-postfix
-  # is pinned ahead: its DB-driven virtual maps + env-gated transport/sasl/milter
-  # (required for actual delivery) shipped in a newer calver than the others.
-  # Override per service so the rest stay on IMAGE_TAG until they roll forward.
+  # Per-service image tags. Every image shares IMAGE_TAG today; the per-service
+  # knob lets one move ahead of the others when it needs to (reference-postfix
+  # did once, for the DB-driven virtual maps actual delivery needs).
   POSTFIX_IMAGE_TAG: '{{.POSTFIX_IMAGE_TAG | default "0.1.0"}}'
 
 includes:
