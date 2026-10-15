@@ -37,7 +37,7 @@ vars:
   DNSMASQ_FRAGMENTS_VOLUME: '{{.DNSMASQ_FRAGMENTS_VOLUME | default "testbed_dnsmasq_fragments"}}'
   DNSMASQ_CONTAINER: '{{.DNSMASQ_CONTAINER | default "testbed-dnsmasq"}}'
   DNSMASQ_IMAGE: '{{.DNSMASQ_IMAGE | default "ghcr.io/rest-mail/reference-dnsmasq"}}'
-  IMAGE_TAG: '{{.IMAGE_TAG | default "2026.04.28"}}'
+  IMAGE_TAG: '{{.IMAGE_TAG | default "0.1.0"}}'
 
   # Per-instance IPs — mail1 defaults from configs/mail1/dns.env. The parent
   # Taskfile (rest-mail) overrides these for mail2 via include vars.
@@ -68,7 +68,7 @@ vars:
   # is pinned ahead: its DB-driven virtual maps + env-gated transport/sasl/milter
   # (required for actual delivery) shipped in a newer calver than the others.
   # Override per service so the rest stay on IMAGE_TAG until they roll forward.
-  POSTFIX_IMAGE_TAG: '{{.POSTFIX_IMAGE_TAG | default "2026.07.22"}}'
+  POSTFIX_IMAGE_TAG: '{{.POSTFIX_IMAGE_TAG | default "0.1.0"}}'
 
 includes:
   postgres:
