@@ -18,7 +18,7 @@ vars:
   NETWORK: '{{.NETWORK | default "testbed_mailnet"}}'
   IP: '{{.IP | default "10.99.0.17"}}'
   CONFIG_DIR: '{{.CONFIG_DIR | default "./configs/mail1"}}'
-  IMAGE_TAG: '{{.IMAGE_TAG | default "2026.04.28"}}'
+  IMAGE_TAG: '{{.IMAGE_TAG | default "0.1.0"}}'
   IMAGE: '{{.IMAGE | default "ghcr.io/rest-mail/reference-rspamd"}}'
   CONTAINER_NAME: '{{.PROJECT}}-rspamd'
 
