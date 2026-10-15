@@ -13,8 +13,8 @@ Part of the [rest-mail](https://github.com/rest-mail) decomposition.
 | `postgres` | `postgres:16-alpine`                         | virtual users, mailboxes, aliases    |
 | `postfix`  | `ghcr.io/rest-mail/reference-postfix:0.1.0`       | SMTP MTA on 25/465/587               |
 | `dovecot`  | `ghcr.io/rest-mail/reference-dovecot:0.1.0`       | IMAP/POP3 + LMTP delivery            |
-| `rspamd`   | `ghcr.io/rest-mail/reference-rspamd:2026.04.28`   | spam scoring, DKIM signing           |
-| `fail2ban` | `ghcr.io/rest-mail/reference-fail2ban:2026.04.28` | brute-force protection on auth logs  |
+| `rspamd`   | `ghcr.io/rest-mail/reference-rspamd:0.1.0`        | spam scoring, DKIM signing           |
+| `fail2ban` | `ghcr.io/rest-mail/reference-fail2ban:0.1.0`      | brute-force protection on auth logs  |
 
 Each service is driven by its own file under `tasks/` (`postgres.yml`, `postfix.yml`, `dovecot.yml`, `rspamd.yml`, `fail2ban.yml`), and each task file wraps a single `docker run` invocation. This mirrors the per-service layout used by `rest-mail/tasks/`.
 
