@@ -1,0 +1,135 @@
+name: certs
+
+# No reference daemon can read the testbed CA's key or another instance's key
+# (#9). `stub` runs tests/stage-certs-test.sh (staging through the real tasks,
+# with a stub docker). `containers` brings mail1 up for real against a scratch
+# network and a scratch issuing volume (its own CA, mail1 and mail2 leaves) and
+# looks inside the running postfix and dovecot.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  stub:
+    name: staging (stub docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: tests/stage-certs-test.sh
+
+  containers:
+    name: daemons hold only their own certificates
+    runs-on: ubuntu-latest
+    env:
+      VARS: CERTS_VOLUME=ci-testbed-certs MAILNET_NAME=ci-mailnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scratch mailnet and issuing volume (CA, mail1 and mail2 leaves)
+        run: |
+          set -eu
+          docker network create --subnet 10.99.0.0/16 ci-mailnet
+          docker volume create ci-testbed-certs
+          docker run --rm -v ci-testbed-certs:/certs alpine:3.20 sh -euc '
+            apk add --no-cache openssl >/dev/null
+            cd /certs
+            openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=ci testbed CA" \
+              -keyout ca.key -out ca.crt 2>/dev/null
+            for h in mail1.test mail2.test; do
+              openssl req -newkey rsa:2048 -nodes -subj "/CN=$h" -addext "subjectAltName=DNS:$h" \
+                -keyout "$h.key" -out "$h.csr" 2>/dev/null
+              openssl x509 -req -in "$h.csr" -CA ca.crt -CAkey ca.key -CAcreateserial -days 1 \
+                -copy_extensions copy -out "$h.crt" 2>/dev/null
+              rm "$h.csr"
+            done
+            rm -f ca.srl
+            ls -l /certs'
+
+      - name: Bring mail1 up
+        run: |
+          set -eu
+          task postgres:up CONFIG=mail1 $VARS
+          for _ in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' mailref-mail1-postgres)" = healthy ] && break
+            sleep 2
+          done
+          task postfix:up dovecot:up rspamd:up fail2ban:up CONFIG=mail1 $VARS
+
+      - name: Postfix and dovecot hold only mail1's leaf and the CA certificate
+        run: |
+          set -eu
+          for svc in postfix dovecot; do
+            c=mailref-mail1-$svc
+            for _ in $(seq 1 30); do
+              [ "$(docker inspect -f '{{.State.Running}}' "$c")" = true ] && break
+              sleep 1
+            done
+            echo "== docker exec $c ls -la /certs"
+            docker exec "$c" ls -la /certs
+            got=$(docker exec "$c" ls -A /certs | sort | tr '\n' ' ')
+            [ "$got" = "ca.crt mail1.test.crt mail1.test.key " ] || { echo "$c /certs holds: $got"; exit 1; }
+            docker exec "$c" sh -c '! test -e /certs/ca.key' || { echo "$c can see ca.key"; exit 1; }
+            docker exec "$c" sh -c '! test -e /certs/mail2.test.key' || { echo "$c can see mail2's key"; exit 1; }
+            [ "$(docker exec "$c" stat -c '%a %u' /certs/mail1.test.key)" = "400 0" ] || { echo "$c key is not root 0400"; exit 1; }
+            if docker exec "$c" touch /certs/probe 2>/dev/null; then echo "$c can write /certs"; exit 1; fi
+          done
+          echo "== mounts"
+          for c in $(docker ps -a --format '{{.Names}}' --filter name=^/mailref-mail1-); do
+            mounts=$(docker inspect -f '{{range .Mounts}}{{.Name}}{{.Source}} {{end}}' "$c")
+            echo "$c: $mounts"
+            case " $mounts " in *ci-testbed-certs*) echo "$c mounts the issuing volume"; exit 1 ;; esac
+          done
+
+      - name: Postfix and dovecot serve mail1's leaf
+        run: |
+          set -eu
+          # The verifier reads only certificates, from postfix's staged copy.
+          docker run --rm --network ci-mailnet -v mailref-mail1-postfix-certs:/certs:ro alpine:3.20 sh -euc '
+            apk add --no-cache openssl >/dev/null
+            want=$(openssl x509 -in /certs/mail1.test.crt -noout -fingerprint -sha256)
+            served() {
+              for _ in $(seq 1 30); do
+                out=$(openssl s_client "$@" -servername mail1.test -CAfile /certs/ca.crt -verify_return_error \
+                  </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null) || out=
+                [ -n "$out" ] && { echo "$out"; return 0; }
+                sleep 2
+              done
+              return 1
+            }
+            smtp=$(served -connect 10.99.0.11:25 -starttls smtp) || { echo "postfix served no verifiable certificate"; exit 1; }
+            imaps=$(served -connect 10.99.0.111:993) || { echo "dovecot served no verifiable certificate"; exit 1; }
+            echo "mail1.test.crt   $want"
+            echo "postfix STARTTLS $smtp"
+            echo "dovecot IMAPS    $imaps"
+            [ "$smtp" = "$want" ] && [ "$imaps" = "$want" ]'
+
+      - name: A daemon whose leaf is missing never starts
+        run: |
+          set -eu
+          docker run --rm -v ci-testbed-certs:/certs alpine:3.20 rm /certs/mail2.test.key
+          for svc in postfix dovecot; do
+            if task "$svc:up" CONFIG=mail2 HOSTNAME=mail2.test POSTFIX_IP=10.99.0.12 DOVECOT_IP=10.99.0.112 $VARS; then
+              echo "$svc:up mail2 succeeded without mail2.test.key"; exit 1
+            fi
+            if docker ps -aq --filter "name=^/mailref-mail2-$svc$" | grep -q .; then
+              echo "mailref-mail2-$svc was created without its key"; exit 1
+            fi
+          done
+
+      - name: Daemon logs
+        if: failure()
+        run: |
+          for c in $(docker ps -a --format '{{.Names}}' --filter name=^/mailref-); do
+            echo "::group::$c"; docker logs --tail 80 "$c" 2>&1; echo "::endgroup::"
+          done

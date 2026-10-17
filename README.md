@@ -23,7 +23,9 @@ Each service is driven by its own file under `tasks/` (`postgres.yml`, `postfix.
 This composer joins `mailnet` as **external**. It does not create the network, does not run dnsmasq, and does not generate TLS certs. Those concerns belong to [`rest-mail/testbed`](https://github.com/rest-mail/testbed):
 
 - `mailnet` (default name `testbed_mailnet`) — bridge network with subnet `10.99.0.0/16`. dnsmasq sits at `10.99.0.10` and resolves `*.test` to peer containers.
-- `certs` (default name `testbed_certs`) — shared volume populated by `reference-certgen` with `mail1.test.crt`, `mail1.test.key`, `mail2.test.crt`, `mail2.test.key`, and the shared CA bundle.
+- `certs` (default name `testbed_certs`) — shared volume populated by `reference-certgen` with `mail1.test.crt`, `mail1.test.key`, `mail2.test.crt`, `mail2.test.key`, and the CA certificate `ca.crt`. It also holds the CA's private key, `ca.key`.
+
+No daemon mounts `certs`: anything that could read `ca.key` could sign certificates every testbed peer trusts. Right before postfix or dovecot starts, `tasks/stage-certs.sh` copies just the files that daemon needs out of it (a one-off container mounting it read-only) into the daemon's own volume, `mailref-<config>-<service>-certs`, which the daemon mounts read-only at `/certs`: the leaf its env file names in `POSTFIX_TLS_CERT`/`POSTFIX_TLS_KEY` (or `DOVECOT_TLS_*`), and `ca.crt`. They're owned by root, which the images run as, keys `0400`, certificates `0444`. If any of them is missing, `up` stops before the daemon starts. Each `up` copies them afresh, so a reissued certificate takes effect on the next `task <service>:restart`.
 
 DNS registration with the testbed dnsmasq is handled via the `reference-dnsmasq` image's `render-fragment` subcommand — unchanged from the previous compose-based layout.
 
@@ -95,7 +97,7 @@ Tear down (per instance):
 
 ```bash
 task down CONFIG=mail1       # stop containers, keep volumes
-task destroy CONFIG=mail1    # also drop postgres-data / maildir volumes
+task destroy CONFIG=mail1    # also drop postgres-data / maildir / staged-certs volumes
 ```
 
 ## Tasks
@@ -116,7 +118,7 @@ task fail2ban:logs CONFIG=mail1
 Each `CONFIG=<name>` invocation produces distinct, namespaced resources:
 
 - Containers: `mailref-<config>-<service>` (e.g. `mailref-mail1-postfix`).
-- Volumes: `mailref-<config>-postgres-data` and `mailref-<config>-maildir`.
+- Volumes: `mailref-<config>-postgres-data`, `mailref-<config>-maildir`, and the staged certificates `mailref-<config>-postfix-certs` and `mailref-<config>-dovecot-certs`.
 
 So `mail1` and `mail2` never collide.
 

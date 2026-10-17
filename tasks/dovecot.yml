@@ -22,6 +22,9 @@ silent: true
 vars:
   PROJECT: '{{.PROJECT | default "mailref-mail1"}}'
   NETWORK: '{{.NETWORK | default "testbed_mailnet"}}'
+  # Where the testbed issues certificates. It also holds the testbed CA's key,
+  # so the daemon never mounts it (#9): `up` copies this instance's leaf and the
+  # CA certificate into OWN_CERTS_VOLUME (stage-certs.sh) and mounts that.
   CERTS_VOLUME: '{{.CERTS_VOLUME | default "testbed_certs"}}'
   IP: '{{.IP | default "10.99.0.111"}}'
   HOSTNAME: '{{.HOSTNAME | default "mail1.test"}}'
@@ -29,6 +32,10 @@ vars:
   IMAGE_TAG: '{{.IMAGE_TAG | default "0.1.0"}}'
   IMAGE: '{{.IMAGE | default "ghcr.io/rest-mail/reference-dovecot"}}'
   CONTAINER_NAME: '{{.PROJECT}}-dovecot'
+  OWN_CERTS_VOLUME: '{{.PROJECT}}-dovecot-certs'
+  # The image has no USER: Dovecot's master process reads the key as root before
+  # any process drops privileges, so root owns the staged copies.
+  CERTS_OWNER: '{{.CERTS_OWNER | default "0:0"}}'
   MAILDIR_VOLUME: '{{.PROJECT}}-maildir'
 
 tasks:
@@ -52,6 +59,13 @@ tasks:
         [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
         echo "  starting dovecot ({{.CONTAINER_NAME}} @ {{.IP}})"
         docker rm -f {{.CONTAINER_NAME}} >$OUTPUT 2>&1 || true
+        # Only the leaf the env file points dovecot at, and the CA certificate
+        # its entrypoint trusts. A path outside /certs leaves the name empty,
+        # which stage-certs.sh refuses, so nothing starts.
+        CERT=$(sed -n 's|^DOVECOT_TLS_CERT=/certs/||p' {{.CONFIG_DIR}}/env | tail -n 1)
+        KEY=$(sed -n 's|^DOVECOT_TLS_KEY=/certs/||p' {{.CONFIG_DIR}}/env | tail -n 1)
+        sh "{{.TASKFILE_DIR}}/stage-certs.sh" {{.OWN_CERTS_VOLUME}} {{.CERTS_OWNER}} {{.CERTS_VOLUME}} \
+          "$CERT" "$KEY" ca.crt || exit 1
         docker run -d --name {{.CONTAINER_NAME}} \
           --hostname {{.HOSTNAME}} \
           --restart unless-stopped \
@@ -60,7 +74,7 @@ tasks:
           -v {{.CONFIG_DIR}}/resolv.conf:/etc/resolv.conf:ro \
           --env-file {{.CONFIG_DIR}}/env \
           -v {{.CONFIG_DIR}}/dovecot-overlay:/etc/dovecot-overlay:ro \
-          -v {{.CERTS_VOLUME}}:/certs:ro \
+          -v {{.OWN_CERTS_VOLUME}}:/certs:ro \
           -v {{.MAILDIR_VOLUME}}:/var/mail/vhosts \
           {{.IMAGE}}:{{.IMAGE_TAG}} >$OUTPUT 2>&1
 
