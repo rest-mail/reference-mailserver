@@ -54,3 +54,31 @@ jobs:
             exit 0
           fi
           echo "$shells" | xargs -r shellcheck
+
+  api-ip-check:
+    name: API_IP check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Fixture tests (drift, missing, malformed, ambiguous input; task up stops before docker)
+        run: python3 -m unittest discover -s scripts -v
+
+      # The real cross-repo check: configs/*/dns.env against the testbed's
+      # current manifest, so drift fails here too, not only at `task up`.
+      - uses: actions/checkout@v4
+        with:
+          repository: rest-mail/testbed
+          path: testbed
+
+      - name: configs/*/dns.env API_IP matches the testbed manifest
+        run: task check:api-ip TESTBED_MANIFEST=testbed/configs/restmail/manifest.yml
