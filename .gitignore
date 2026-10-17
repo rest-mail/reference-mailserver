@@ -9,3 +9,6 @@
 
 # DKIM private keys are provisioned at runtime by `task dkim:provision`.
 configs/*/rspamd-overlay/dkim/
+
+# Bytecode from running the check script tests.
+__pycache__/

@@ -6,6 +6,19 @@ Versioning is calver: `YYYY.MM.DD`, with a `.N` suffix for multiple releases on 
 ## [Unreleased]
 
 ### Added
+- **`task check:api-ip` fails when `API_IP` drifts from the testbed manifest.**
+  Every `configs/*/dns.env` restates the API address that the testbed's
+  `configs/restmail/manifest.yml` allocates (its `api` component), and nothing
+  checked the copies agreed: move the API in the manifest and mail1/mail2
+  kept publishing DNS for an address nothing listens on. The check parses the
+  manifest with PyYAML and the `dns.env` files as data, compares normalized
+  IPs, and fails on drift and on anything it can't check (missing or invalid
+  manifest, no or several `api` components, duplicate keys, missing,
+  repeated or invalid `API_IP`). `dns:register`, and so `up`, runs it before
+  any docker command. The manifest path defaults to the sibling
+  `../testbed` clone and is overridable with `TESTBED_MANIFEST`; substrates
+  without the testbed skip it explicitly with `SKIP_API_IP_CHECK=1`. Needs
+  Python 3 with PyYAML (#7).
 - **DKIM signing provisioning** (`task dkim:provision CONFIG=<name>`). Generates
   an RSA keypair via `rspamadm dkim_keygen`, installs the private key into the
   instance's `rspamd-overlay/dkim/` (loaded into rspamd's `dkim_signing`

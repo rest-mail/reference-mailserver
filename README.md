@@ -2,7 +2,7 @@
 
 A thin composer that assembles `reference-postfix` + `reference-dovecot` + Postgres + `reference-rspamd` + `reference-fail2ban` into one traditional mail server. Parameterized by config dir — the same Taskfile spins up as `mail1`, `mail2`, or anything else by pointing it at a different directory.
 
-This repo contains **no daemon code and no Dockerfiles**. It's just a `Taskfile.yml`, per-service task files under `tasks/`, and per-instance config directories. All the daemon logic lives in the upstream `rest-mail/reference-*` images.
+This repo contains **no daemon code and no Dockerfiles**. It's just a `Taskfile.yml`, per-service task files under `tasks/`, per-instance config directories, and one small consistency check under `scripts/`. All the daemon logic lives in the upstream `rest-mail/reference-*` images.
 
 Part of the [rest-mail](https://github.com/rest-mail) decomposition.
 
@@ -27,11 +27,42 @@ This composer joins `mailnet` as **external**. It does not create the network, d
 
 DNS registration with the testbed dnsmasq is handled via the `reference-dnsmasq` image's `render-fragment` subcommand — unchanged from the previous compose-based layout.
 
-If you don't want to depend on the testbed (e.g. you're plugging this into a different substrate), override at run time:
+### The API address
+
+Each `configs/<name>/dns.env` carries `API_IP`, the rest-mail API's address on mailnet. The testbed's instance manifest, `configs/restmail/manifest.yml`, allocates that address (the `ip` of its `api` component) and is the authority; the `dns.env` copies must match it. `task check:api-ip` compares every `configs/*/dns.env` `API_IP` with the manifest and fails, naming each file, when they differ. It also fails when it can't check: the manifest is missing or isn't valid YAML, it has no `api` component or more than one, an IP is invalid, or a `dns.env` sets `API_IP` zero times or more than once.
+
+`task dns:register` (and so `task up`) runs the check first, before any docker command. To fix drift, set `API_IP` in the `dns.env` files to the manifest's value.
+
+The check reads the manifest from `../testbed/configs/restmail/manifest.yml`, the testbed clone next to this repo from the quick start below. Point it elsewhere with `TESTBED_MANIFEST`:
 
 ```bash
-MAILNET_NAME=mynet CERTS_VOLUME=mycerts task up CONFIG=mail1
+task up CONFIG=mail1 TESTBED_MANIFEST=/path/to/testbed/configs/restmail/manifest.yml
 ```
+
+It reads local files only; it never fetches the manifest over the network.
+
+### Without the testbed
+
+If you don't want to depend on the testbed (e.g. you're plugging this into a different substrate), override at run time. There is no testbed manifest to check `API_IP` against, so either point `TESTBED_MANIFEST` at your substrate's manifest (same `components:` shape), or skip the check explicitly with `SKIP_API_IP_CHECK=1`, which prints a warning:
+
+```bash
+MAILNET_NAME=mynet CERTS_VOLUME=mycerts SKIP_API_IP_CHECK=1 task up CONFIG=mail1
+```
+
+`SKIP_API_IP_CHECK` accepts only `1`; any other value is an error, so a typo never skips the check silently.
+
+## Prerequisites
+
+- [Task](https://taskfile.dev) v3 and Docker.
+- Python 3 with [PyYAML](https://pypi.org/project/PyYAML/), for `task check:api-ip` (`pip install pyyaml`, or your distribution's `python3-yaml` package).
+
+The check's fixture tests run with the standard library only (plus PyYAML):
+
+```bash
+python3 -m unittest discover -s scripts -v
+```
+
+Their Taskfile tests swap `docker` for a stub, so they never touch a Docker daemon.
 
 ## Quick start
 
@@ -70,6 +101,7 @@ task destroy CONFIG=mail1    # also drop postgres-data / maildir volumes
 ## Tasks
 
 ```
+task check:api-ip               # API_IP in configs/*/dns.env matches the testbed manifest?
 task up CONFIG=mail1            # bring up one instance (default CONFIG=mail1)
 task down CONFIG=mail1          # stop one instance
 task destroy CONFIG=mail1       # stop and drop volumes
@@ -92,7 +124,7 @@ So `mail1` and `mail2` never collide.
 
 ## Adding a third instance
 
-1. Copy `configs/mail1/` to `configs/mail3/`.
+1. Copy `configs/mail1/` to `configs/mail3/` (keep `API_IP` in `dns.env`: it's the shared API address the check verifies).
 2. In `configs/mail3/env`, replace every `mail1.test` with `mail3.test`.
 3. In `configs/mail3/postgres-init/02-seed.sql`, replace the domain and pick distinct local-parts.
 4. Make sure the testbed's certgen issues `mail3.test.{crt,key}` and dnsmasq resolves `mail3.test` — without those this composer cannot do anything useful.
@@ -105,7 +137,7 @@ No code changes anywhere.
 ```
 configs/<name>/
 ├── env                       # POSTFIX_*, DOVECOT_*, RSPAMD_*, POSTGRES_* vars
-├── dns.env                   # values consumed by reference-dnsmasq render-fragment
+├── dns.env                   # values consumed by reference-dnsmasq render-fragment (API_IP checked by check:api-ip)
 ├── postgres-init/
 │   ├── 01-schema.sql         # virtual users / mailboxes / aliases
 │   └── 02-seed.sql           # initial accounts

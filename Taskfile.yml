@@ -64,6 +64,16 @@ vars:
   RSPAMD_IMAGE: '{{.RSPAMD_IMAGE | default "ghcr.io/rest-mail/reference-rspamd"}}'
   FAIL2BAN_IMAGE: '{{.FAIL2BAN_IMAGE | default "ghcr.io/rest-mail/reference-fail2ban"}}'
 
+  # Where the authoritative API address lives. The testbed's rest-mail manifest
+  # allocates the API's IP (its `api` component); every configs/*/dns.env
+  # restates it as API_IP. check:api-ip fails when they differ, and runs
+  # before dns:register publishes anything. Default assumes the testbed is
+  # cloned next to this repo, as in the README quick start. On a substrate
+  # without the testbed, point TESTBED_MANIFEST at that substrate's manifest,
+  # or set SKIP_API_IP_CHECK=1 to skip the check out loud.
+  TESTBED_MANIFEST: '{{.TESTBED_MANIFEST | default "../testbed/configs/restmail/manifest.yml"}}'
+  SKIP_API_IP_CHECK: '{{.SKIP_API_IP_CHECK | default ""}}'
+
   # Per-service image tags. Every image shares IMAGE_TAG today; the per-service
   # knob lets one move ahead of the others when it needs to (reference-postfix
   # did once, for the DB-driven virtual maps actual delivery needs).
@@ -132,6 +142,8 @@ tasks:
   up:
     desc: Bring up one mail server (CONFIG=mail1|mail2|...)
     cmds:
+      # dns:register runs check:api-ip first, so API_IP drift stops `up`
+      # before any docker side effect.
       - task: dns:register
       - task: postgres:up
       - |
@@ -186,6 +198,7 @@ tasks:
   dns:register:
     desc: Render this instance's dnsmasq fragment + reload (without bringing up containers)
     cmds:
+      - task: check:api-ip
       - |
         docker run --rm \
           -v "{{.DNSMASQ_FRAGMENTS_VOLUME}}:/dst" \
@@ -196,6 +209,26 @@ tasks:
         if docker ps -aq --filter "name=^/{{.DNSMASQ_CONTAINER}}$" | grep -q .; then
           docker restart {{.DNSMASQ_CONTAINER}} >/dev/null
         fi
+
+  check:api-ip:
+    desc: 'Fail if any configs/*/dns.env API_IP differs from the testbed manifest api ip (TESTBED_MANIFEST=<path>, SKIP_API_IP_CHECK=1)'
+    env:
+      TESTBED_MANIFEST: '{{.TESTBED_MANIFEST}}'
+      SKIP_API_IP_CHECK: '{{.SKIP_API_IP_CHECK}}'
+    cmds:
+      - |
+        case "$SKIP_API_IP_CHECK" in
+          "") ;;
+          1)
+            echo "  WARNING: SKIP_API_IP_CHECK=1 - API_IP in configs/*/dns.env is NOT checked against any manifest" >&2
+            exit 0
+            ;;
+          *)
+            echo "  check:api-ip: SKIP_API_IP_CHECK must be 1 or unset (got '$SKIP_API_IP_CHECK')" >&2
+            exit 1
+            ;;
+        esac
+        python3 ./scripts/check_api_ip.py --manifest "$TESTBED_MANIFEST" --configs ./configs
 
   dns:unregister:
     desc: Remove this instance's dnsmasq fragment + reload (without touching containers)
