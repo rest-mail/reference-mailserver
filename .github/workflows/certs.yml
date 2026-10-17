@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VARS: CERTS_VOLUME=ci-testbed-certs MAILNET_NAME=ci-mailnet
+      RUN_ROOT: /tmp/reference-mailserver-certs-ci
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-task@v2
@@ -59,6 +60,8 @@ jobs:
       - name: Bring mail1 up
         run: |
           set -eu
+          task config:snapshot CONFIG=mail1
+          task config:snapshot CONFIG=mail2
           task postgres:up CONFIG=mail1 $VARS
           for _ in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' mailref-mail1-postgres)" = healthy ] && break

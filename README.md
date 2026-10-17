@@ -104,6 +104,8 @@ task destroy CONFIG=mail1    # also drop postgres-data / maildir / staged-certs 
 
 ```
 task check:api-ip               # API_IP in configs/*/dns.env matches the testbed manifest?
+task config:snapshot CONFIG=mail1  # pin a new snapshot of configs/mail1 (containers keep theirs)
+task config:show CONFIG=mail1   # print the snapshot dir CONFIG's containers mount
 task up CONFIG=mail1            # bring up one instance (default CONFIG=mail1)
 task down CONFIG=mail1          # stop one instance
 task destroy CONFIG=mail1       # stop and drop volumes
@@ -119,6 +121,7 @@ Each `CONFIG=<name>` invocation produces distinct, namespaced resources:
 
 - Containers: `mailref-<config>-<service>` (e.g. `mailref-mail1-postfix`).
 - Volumes: `mailref-<config>-postgres-data`, `mailref-<config>-maildir`, and the staged certificates `mailref-<config>-postfix-certs` and `mailref-<config>-dovecot-certs`.
+- Config snapshots: `$RUN_ROOT/<config>/` (see [Config snapshots](#config-snapshots)).
 
 So `mail1` and `mail2` never collide.
 
@@ -150,6 +153,21 @@ configs/<name>/
 ```
 
 The overlay directories are intentionally empty by default — the published reference images ship working defaults driven by the env file. Drop files into the relevant overlay only when you need to deviate from those defaults.
+
+## Config snapshots
+
+A running container never reads this checkout. `task up CONFIG=<name>` copies `configs/<name>/` into an immutable snapshot in an operator-owned run directory, and every daemon (postgres, postfix, dovecot, rspamd, fail2ban) and the dnsmasq registration mount that copy: `env`, `dns.env`, `resolv.conf`, `postgres-init/` and the overlays, including generated files such as DKIM keys. A branch switch, rebase or `git clean -fdx` here can't change, or delete, the config of a stack that is up.
+
+```
+$RUN_ROOT/<name>/snapshots/<id>/   read-only copy; <id> is a hash of its content
+$RUN_ROOT/<name>/current           the pinned <id>, replaced atomically
+```
+
+- **Run root.** `RUN_ROOT` defaults to `$XDG_STATE_HOME/reference-mailserver` (`~/.local/state/reference-mailserver`). Override it per invocation, e.g. `task up CONFIG=mail1 RUN_ROOT=/srv/mailref`. It must be an absolute path outside every git work tree (checked on the resolved path, so a symlink into a checkout is refused too), owned by you and not group/other-writable; it is created `0700` if missing.
+- **What is copied.** Only regular files and directories. A source containing a symlink, a `.git` entry or a special file, or missing any of `env`, `dns.env`, `resolv.conf`, `postgres-init/` or an overlay dir, is refused before anything is written.
+- **Versioning.** The same content always gives the same `<id>`, so re-running `up` on an unchanged config reuses its snapshot. Changed content gives a new directory; existing snapshots are never overwritten or deleted, so a container still mounting an older one keeps its bytes. A snapshot edited in place no longer matches its id and is refused rather than reused.
+- **Refresh is explicit.** `task up` snapshots the source and pins it. Recreating a single service (`task <svc>:up`, `task <svc>:restart`) mounts the *pinned* snapshot and never re-reads `configs/`. `task config:snapshot CONFIG=<name>` pins a new snapshot without touching containers; each one picks it up the next time it is recreated. `task dkim:provision` pins a snapshot carrying the new key and recreates rspamd on it. `task config:show CONFIG=<name>` prints what is pinned.
+- **Teardown.** `task down` and `task destroy` address containers and volumes by name and don't need `configs/` at all. Neither removes snapshots: once nothing runs on them, delete `$RUN_ROOT/<name>/snapshots/<id>` yourself (`chmod -R u+w` first; snapshot files are read-only).
 
 ## Seeded users
 

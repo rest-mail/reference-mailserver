@@ -268,6 +268,8 @@ class TaskfileWiringTest(unittest.TestCase):
         self.env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"])
         for var in ("TESTBED_MANIFEST", "SKIP_API_IP_CHECK"):
             self.env.pop(var, None)
+        # Config snapshots go to a throwaway run root, never the operator's.
+        self.env["RUN_ROOT"] = os.path.join(self.tmp, "run")
         self.manifest = os.path.join(self.tmp, "manifest.yml")
 
     def write_manifest(self, api_ip):
@@ -309,6 +311,9 @@ class TaskfileWiringTest(unittest.TestCase):
 
     def test_dns_register_with_matching_manifest_reaches_docker(self):
         self.write_manifest(committed_api_ip())
+        # dns:register mounts dns.env from the pinned config snapshot.
+        r = self.task("config:snapshot")
+        self.assertEqual(r.returncode, 0, r.stderr)
         r = self.task("dns:register", f"TESTBED_MANIFEST={self.manifest}")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("matches the manifest", r.stdout)

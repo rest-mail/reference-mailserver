@@ -7,9 +7,9 @@ version: "3"
 #
 # Joins the testbed's mailnet network at a static IP so peers can reach it
 # by name. DB credentials come from the per-instance env file
-# ({{.CONFIG_DIR}}/env), which sets POSTGRES_DB / POSTGRES_USER /
-# POSTGRES_PASSWORD. First-boot SQL is bind-mounted read-only from
-# {{.CONFIG_DIR}}/postgres-init. Data lives in a named volume so the
+# (env in the pinned config snapshot), which sets POSTGRES_DB / POSTGRES_USER /
+# POSTGRES_PASSWORD. First-boot SQL is bind-mounted read-only from the
+# snapshot's postgres-init. Data lives in a named volume so the
 # container can be recreated without losing state. `reset` is the only
 # destructive task.
 #
@@ -22,7 +22,10 @@ vars:
   PROJECT: '{{.PROJECT | default "mailref-mail1"}}'
   NETWORK: '{{.NETWORK | default "testbed_mailnet"}}'
   IP: '{{.IP | default "10.99.0.41"}}'
-  CONFIG_DIR: '{{.CONFIG_DIR | default "./configs/mail1"}}'
+  # The container mounts the instance's pinned config snapshot (see
+  # scripts/config_snapshot.py), never ./configs in the checkout.
+  CONFIG: '{{.CONFIG | default "mail1"}}'
+  RUN_ROOT: '{{.RUN_ROOT | default ""}}'
   IMAGE: '{{.IMAGE | default "postgres:16-alpine"}}'
   CONTAINER_NAME: '{{.PROJECT}}-postgres'
   DATA_VOLUME: '{{.PROJECT}}-postgres-data'
@@ -47,13 +50,14 @@ tasks:
       - |
         [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
         echo "  starting postgres ({{.CONTAINER_NAME}} @ {{.IP}})"
+        CONFIG_DIR=$(python3 ./scripts/config_snapshot.py current --config "{{.CONFIG}}" --run-root "{{.RUN_ROOT}}") || exit 1
         docker rm -f {{.CONTAINER_NAME}} >$OUTPUT 2>&1 || true
         docker run -d --name {{.CONTAINER_NAME}} \
           --restart unless-stopped \
           --network {{.NETWORK}} \
           --ip {{.IP}} \
-          --env-file {{.CONFIG_DIR}}/env \
-          -v {{.CONFIG_DIR}}/postgres-init:/docker-entrypoint-initdb.d:ro \
+          --env-file "$CONFIG_DIR/env" \
+          -v "$CONFIG_DIR/postgres-init:/docker-entrypoint-initdb.d:ro" \
           -v {{.DATA_VOLUME}}:/var/lib/postgresql/data \
           --health-cmd 'pg_isready -U "$POSTGRES_USER"' \
           --health-interval 10s \
