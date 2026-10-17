@@ -45,6 +45,15 @@ Versioning is calver: `YYYY.MM.DD`, with a `.N` suffix for multiple releases on 
   instances must coexist with it on the shared mailnet.
 
 ### Fixed
+- **No daemon can read the testbed CA's key.** postfix and dovecot mounted the
+  whole `testbed_certs` volume, `ca.key` and every instance's leaf key
+  included. Each `up` now copies only the leaf its env file names
+  (`POSTFIX_TLS_*`/`DOVECOT_TLS_*`) and `ca.crt` into the daemon's own
+  `mailref-<config>-<service>-certs` volume (root, keys 0400, certificates
+  0444) and mounts that read-only at `/certs`. `tasks/stage-certs.sh` does the
+  copy in a one-off container, the only thing that mounts `testbed_certs`; if
+  a file is missing, the daemon doesn't start. `destroy` drops the staged
+  volumes (#9).
 - **Every service launched on the same (wrong) image.** Each `tasks/<svc>.yml`
   declared a self-referencing `IMAGE` var; Task flattens all included taskfiles'
   vars into one shared namespace, so the five `IMAGE` defaults collided and a

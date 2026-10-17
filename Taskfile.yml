@@ -188,7 +188,8 @@ tasks:
     cmds:
       - task: down
       - |
-        for vol in "mailref-{{.CONFIG}}-postgres-data" "mailref-{{.CONFIG}}-maildir"; do
+        for vol in "mailref-{{.CONFIG}}-postgres-data" "mailref-{{.CONFIG}}-maildir" \
+          "mailref-{{.CONFIG}}-postfix-certs" "mailref-{{.CONFIG}}-dovecot-certs"; do
           if docker volume inspect "$vol" >/dev/null 2>&1; then
             echo "  removing volume $vol"
             docker volume rm -f "$vol" >/dev/null
