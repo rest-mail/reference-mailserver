@@ -6,7 +6,7 @@ version: "3"
 # Included by the main Taskfile under namespace `fail2ban`.
 #
 # Joins the testbed's mailnet network at a static IP so peers can reach it
-# by name. Reads its configuration overlay from the project's CONFIG_DIR.
+# by name. Reads its configuration overlay from the instance's pinned config snapshot.
 #
 # Output is friendly by default. Re-run with VERBOSE=1 to see the raw
 # docker / shell output (e.g. VERBOSE=1 task fail2ban:up).
@@ -17,7 +17,10 @@ vars:
   PROJECT: '{{.PROJECT | default "mailref-mail1"}}'
   NETWORK: '{{.NETWORK | default "testbed_mailnet"}}'
   IP: '{{.IP | default "10.99.0.14"}}'
-  CONFIG_DIR: '{{.CONFIG_DIR | default "./configs/mail1"}}'
+  # The container mounts the instance's pinned config snapshot (see
+  # scripts/config_snapshot.py), never ./configs in the checkout.
+  CONFIG: '{{.CONFIG | default "mail1"}}'
+  RUN_ROOT: '{{.RUN_ROOT | default ""}}'
   IMAGE_TAG: '{{.IMAGE_TAG | default "0.1.0"}}'
   IMAGE: '{{.IMAGE | default "ghcr.io/rest-mail/reference-fail2ban"}}'
   CONTAINER_NAME: '{{.PROJECT}}-fail2ban'
@@ -34,6 +37,7 @@ tasks:
       - |
         [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
         echo "  starting fail2ban ({{.CONTAINER_NAME}} @ {{.IP}})"
+        CONFIG_DIR=$(python3 ./scripts/config_snapshot.py current --config "{{.CONFIG}}" --run-root "{{.RUN_ROOT}}") || exit 1
         docker rm -f {{.CONTAINER_NAME}} >$OUTPUT 2>&1 || true
         docker run -d --name {{.CONTAINER_NAME}} \
           --restart unless-stopped \
@@ -41,8 +45,8 @@ tasks:
           --ip {{.IP}} \
           --cap-add NET_ADMIN \
           --cap-add NET_RAW \
-          --env-file {{.CONFIG_DIR}}/env \
-          -v {{.CONFIG_DIR}}/fail2ban-overlay:/etc/fail2ban-overlay:ro \
+          --env-file "$CONFIG_DIR/env" \
+          -v "$CONFIG_DIR/fail2ban-overlay:/etc/fail2ban-overlay:ro" \
           {{.IMAGE}}:{{.IMAGE_TAG}} >$OUTPUT 2>&1
 
   down:

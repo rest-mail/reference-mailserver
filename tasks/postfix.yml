@@ -24,7 +24,10 @@ vars:
   CERTS_VOLUME: '{{.CERTS_VOLUME | default "testbed_certs"}}'
   IP: '{{.IP | default "10.99.0.11"}}'
   HOSTNAME: '{{.HOSTNAME | default "mail1.test"}}'
-  CONFIG_DIR: '{{.CONFIG_DIR | default "./configs/mail1"}}'
+  # The container mounts the instance's pinned config snapshot (see
+  # scripts/config_snapshot.py), never ./configs in the checkout.
+  CONFIG: '{{.CONFIG | default "mail1"}}'
+  RUN_ROOT: '{{.RUN_ROOT | default ""}}'
   IMAGE_TAG: '{{.IMAGE_TAG | default "0.1.0"}}'
   IMAGE: '{{.IMAGE | default "ghcr.io/rest-mail/reference-postfix"}}'
   CONTAINER_NAME: '{{.PROJECT}}-postfix'
@@ -45,12 +48,13 @@ tasks:
       - |
         [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
         echo "  starting postfix ({{.CONTAINER_NAME}} @ {{.IP}})"
+        CONFIG_DIR=$(python3 ./scripts/config_snapshot.py current --config "{{.CONFIG}}" --run-root "{{.RUN_ROOT}}") || exit 1
         docker rm -f {{.CONTAINER_NAME}} >$OUTPUT 2>&1 || true
         # Only the leaf the env file points postfix at, and the CA certificate
         # its entrypoint trusts. A path outside /certs leaves the name empty,
         # which stage-certs.sh refuses, so nothing starts.
-        CERT=$(sed -n 's|^POSTFIX_TLS_CERT=/certs/||p' {{.CONFIG_DIR}}/env | tail -n 1)
-        KEY=$(sed -n 's|^POSTFIX_TLS_KEY=/certs/||p' {{.CONFIG_DIR}}/env | tail -n 1)
+        CERT=$(sed -n 's|^POSTFIX_TLS_CERT=/certs/||p' "$CONFIG_DIR/env" | tail -n 1)
+        KEY=$(sed -n 's|^POSTFIX_TLS_KEY=/certs/||p' "$CONFIG_DIR/env" | tail -n 1)
         sh "{{.TASKFILE_DIR}}/stage-certs.sh" {{.OWN_CERTS_VOLUME}} {{.CERTS_OWNER}} {{.CERTS_VOLUME}} \
           "$CERT" "$KEY" ca.crt || exit 1
         docker run -d --name {{.CONTAINER_NAME}} \
@@ -58,9 +62,9 @@ tasks:
           --restart unless-stopped \
           --network {{.NETWORK}} \
           --ip {{.IP}} \
-          -v {{.CONFIG_DIR}}/resolv.conf:/etc/resolv.conf:ro \
-          --env-file {{.CONFIG_DIR}}/env \
-          -v {{.CONFIG_DIR}}/postfix-overlay:/etc/postfix-overlay:ro \
+          -v "$CONFIG_DIR/resolv.conf:/etc/resolv.conf:ro" \
+          --env-file "$CONFIG_DIR/env" \
+          -v "$CONFIG_DIR/postfix-overlay:/etc/postfix-overlay:ro" \
           -v {{.OWN_CERTS_VOLUME}}:/certs:ro \
           {{.IMAGE}}:{{.IMAGE_TAG}} >$OUTPUT 2>&1
 

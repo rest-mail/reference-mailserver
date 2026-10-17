@@ -6,6 +6,18 @@ Versioning is calver: `YYYY.MM.DD`, with a `.N` suffix for multiple releases on 
 ## [Unreleased]
 
 ### Added
+- **Running stacks no longer read the checkout** (#6). `task up CONFIG=<name>`
+  copies `configs/<name>` into an immutable, content-addressed snapshot under
+  an operator-owned `RUN_ROOT` (default `~/.local/state/reference-mailserver`,
+  which must be outside every git work tree) and pins it; every daemon and the
+  dnsmasq registration mount the snapshot. Branch switches, rebases and
+  `git clean -fdx` can no longer rewrite or delete a live stack's config, and
+  `down`/`destroy` don't need the source. Single-service recreates mount the
+  pinned snapshot; refreshing is explicit (`task config:snapshot`, or `up`).
+  Sources with symlinks, `.git` or missing parts are refused before anything is
+  written; existing snapshots are never overwritten. `task config:show` prints
+  the pinned snapshot. `dkim:provision` pins a snapshot with the new key and
+  recreates rspamd on it.
 - **`task check:api-ip` fails when `API_IP` drifts from the testbed manifest.**
   Every `configs/*/dns.env` restates the API address that the testbed's
   `configs/restmail/manifest.yml` allocates (its `api` component), and nothing

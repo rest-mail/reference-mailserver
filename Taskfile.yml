@@ -4,7 +4,8 @@ silent: true
 # reference-mailserver Taskfile (per-service orchestrator).
 #
 # Each `CONFIG=<name>` invocation maps to:
-#   - CONFIG_DIR=./configs/<name>
+#   - source config ./configs/<name>, copied by `up` into an immutable
+#     snapshot under RUN_ROOT/<name>/ that every container mounts
 #   - PROJECT=mailref-<name>
 # so that running `task up CONFIG=mail1` and `task up CONFIG=mail2` produces
 # two completely independent stacks on the same mailnet network.
@@ -27,6 +28,14 @@ vars:
   # `task up CONFIG=mail2` silently drove project mailref-mail1 and hijacked
   # mail1's containers with mail2's config. Every use site now inlines the
   # mailref-<CONFIG> / ./configs/<CONFIG> templates, which DO see the CLI value.
+
+  # Operator-owned run directory holding each instance's config snapshots
+  # (scripts/config_snapshot.py). Containers mount RUN_ROOT/<CONFIG>/snapshots/
+  # <id>, never ./configs: a branch switch, rebase or `git clean` in this
+  # checkout cannot change a running stack. Empty means the default,
+  # $XDG_STATE_HOME/reference-mailserver (~/.local/state/reference-mailserver).
+  # Must be outside every git work tree.
+  RUN_ROOT: '{{.RUN_ROOT | default ""}}'
   HOSTNAME: '{{.HOSTNAME | default "mail1.test"}}'
   # NOTE: HOSTNAME default is a fallback; for mail2 the parent override or
   # CLI override must set HOSTNAME=mail2.test. The dns.env in each config dir
@@ -86,7 +95,8 @@ includes:
       PROJECT: 'mailref-{{.CONFIG}}'
       NETWORK: '{{.MAILNET_NAME}}'
       IP: '{{.POSTGRES_IP}}'
-      CONFIG_DIR: './configs/{{.CONFIG}}'
+      CONFIG: '{{.CONFIG}}'
+      RUN_ROOT: '{{.RUN_ROOT}}'
       IMAGE: '{{.POSTGRES_IMAGE}}'
 
   postfix:
@@ -97,7 +107,8 @@ includes:
       CERTS_VOLUME: '{{.CERTS_VOLUME}}'
       IP: '{{.POSTFIX_IP}}'
       HOSTNAME: '{{.HOSTNAME}}'
-      CONFIG_DIR: './configs/{{.CONFIG}}'
+      CONFIG: '{{.CONFIG}}'
+      RUN_ROOT: '{{.RUN_ROOT}}'
       IMAGE: '{{.POSTFIX_IMAGE}}'
       IMAGE_TAG: '{{.POSTFIX_IMAGE_TAG}}'
 
@@ -109,7 +120,8 @@ includes:
       CERTS_VOLUME: '{{.CERTS_VOLUME}}'
       IP: '{{.DOVECOT_IP}}'
       HOSTNAME: '{{.HOSTNAME}}'
-      CONFIG_DIR: './configs/{{.CONFIG}}'
+      CONFIG: '{{.CONFIG}}'
+      RUN_ROOT: '{{.RUN_ROOT}}'
       IMAGE: '{{.DOVECOT_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
@@ -119,7 +131,8 @@ includes:
       PROJECT: 'mailref-{{.CONFIG}}'
       NETWORK: '{{.MAILNET_NAME}}'
       IP: '{{.RSPAMD_IP}}'
-      CONFIG_DIR: './configs/{{.CONFIG}}'
+      CONFIG: '{{.CONFIG}}'
+      RUN_ROOT: '{{.RUN_ROOT}}'
       IMAGE: '{{.RSPAMD_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
@@ -129,7 +142,8 @@ includes:
       PROJECT: 'mailref-{{.CONFIG}}'
       NETWORK: '{{.MAILNET_NAME}}'
       IP: '{{.FAIL2BAN_IP}}'
-      CONFIG_DIR: './configs/{{.CONFIG}}'
+      CONFIG: '{{.CONFIG}}'
+      RUN_ROOT: '{{.RUN_ROOT}}'
       IMAGE: '{{.FAIL2BAN_IMAGE}}'
       IMAGE_TAG: '{{.IMAGE_TAG}}'
 
@@ -142,8 +156,11 @@ tasks:
   up:
     desc: Bring up one mail server (CONFIG=mail1|mail2|...)
     cmds:
-      # dns:register runs check:api-ip first, so API_IP drift stops `up`
-      # before any docker side effect.
+      # check:api-ip first, so API_IP drift stops `up` before any side effect.
+      # Then pin a fresh snapshot of configs/<CONFIG>: everything below mounts
+      # the snapshot, not the checkout.
+      - task: check:api-ip
+      - task: config:snapshot
       - task: dns:register
       - task: postgres:up
       - |
@@ -201,9 +218,10 @@ tasks:
     cmds:
       - task: check:api-ip
       - |
+        CONFIG_DIR=$(python3 ./scripts/config_snapshot.py current --config "{{.CONFIG}}" --run-root "{{.RUN_ROOT}}") || exit 1
         docker run --rm \
           -v "{{.DNSMASQ_FRAGMENTS_VOLUME}}:/dst" \
-          -v "$(pwd)/./configs/{{.CONFIG}}/dns.env:/env:ro" \
+          -v "$CONFIG_DIR/dns.env:/env:ro" \
           {{.DNSMASQ_IMAGE}}:{{.IMAGE_TAG}} \
           render-fragment --name {{.CONFIG}} --project mailref-{{.CONFIG}}
       - |
@@ -213,6 +231,8 @@ tasks:
 
   check:api-ip:
     desc: 'Fail if any configs/*/dns.env API_IP differs from the testbed manifest api ip (TESTBED_MANIFEST=<path>, SKIP_API_IP_CHECK=1)'
+    # up runs it before snapshotting, and again via dns:register: once is enough.
+    run: once
     env:
       TESTBED_MANIFEST: '{{.TESTBED_MANIFEST}}'
       SKIP_API_IP_CHECK: '{{.SKIP_API_IP_CHECK}}'
@@ -230,6 +250,16 @@ tasks:
             ;;
         esac
         python3 ./scripts/check_api_ip.py --manifest "$TESTBED_MANIFEST" --configs ./configs
+
+  config:snapshot:
+    desc: 'Copy configs/<CONFIG> into a new immutable snapshot under RUN_ROOT and pin it (running containers keep theirs until recreated)'
+    cmds:
+      - python3 ./scripts/config_snapshot.py snapshot --config "{{.CONFIG}}" --source "./configs/{{.CONFIG}}" --run-root "{{.RUN_ROOT}}" >/dev/null
+
+  config:show:
+    desc: Print the config snapshot directory CONFIG's containers mount
+    cmds:
+      - python3 ./scripts/config_snapshot.py current --config "{{.CONFIG}}" --run-root "{{.RUN_ROOT}}"
 
   dns:unregister:
     desc: Remove this instance's dnsmasq fragment + reload (without touching containers)
@@ -291,10 +321,13 @@ tasks:
           docker restart {{.DNSMASQ_CONTAINER}} >/dev/null
         fi
 
-        # 3. Reload rspamd so it copies the new overlay (key + dkim_signing.conf)
-        # into local.d and starts signing. No-op if the instance isn't up yet.
-        docker restart mailref-{{.CONFIG}}-rspamd >/dev/null 2>&1 || true
         echo "  DKIM provisioned: $SEL._domainkey.$DOMAIN (rspamd signs for $DOMAIN)"
+      # 3. The key lands in configs/<CONFIG> (the source); rspamd reads only its
+      # snapshot. Pin a new snapshot of configs/<CONFIG> carrying the key and
+      # recreate rspamd on it so it starts signing. The recreate is a no-op if
+      # rspamd isn't running yet.
+      - task: config:snapshot
+      - task: rspamd:reload
 
   ps:
     desc: List containers for the named instance

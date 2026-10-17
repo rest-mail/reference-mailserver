@@ -6,7 +6,8 @@ version: "3"
 # Included by the main Taskfile under namespace `rspamd`.
 #
 # Joins the testbed's mailnet network at a static IP so peers can reach it
-# by name. No data volume — config is mounted read-only from the host.
+# by name. No data volume — config is mounted read-only from the instance's
+# pinned config snapshot.
 #
 # Output is friendly by default. Re-run with VERBOSE=1 to see the raw
 # docker / shell output (e.g. VERBOSE=1 task rspamd:up).
@@ -17,7 +18,10 @@ vars:
   PROJECT: '{{.PROJECT | default "mailref-mail1"}}'
   NETWORK: '{{.NETWORK | default "testbed_mailnet"}}'
   IP: '{{.IP | default "10.99.0.17"}}'
-  CONFIG_DIR: '{{.CONFIG_DIR | default "./configs/mail1"}}'
+  # The container mounts the instance's pinned config snapshot (see
+  # scripts/config_snapshot.py), never ./configs in the checkout.
+  CONFIG: '{{.CONFIG | default "mail1"}}'
+  RUN_ROOT: '{{.RUN_ROOT | default ""}}'
   IMAGE_TAG: '{{.IMAGE_TAG | default "0.1.0"}}'
   IMAGE: '{{.IMAGE | default "ghcr.io/rest-mail/reference-rspamd"}}'
   CONTAINER_NAME: '{{.PROJECT}}-rspamd'
@@ -34,14 +38,15 @@ tasks:
       - |
         [ -n "${VERBOSE}" ] && OUTPUT=/dev/stdout || OUTPUT=/dev/null
         echo "  starting rspamd ({{.CONTAINER_NAME}} @ {{.IP}})"
+        CONFIG_DIR=$(python3 ./scripts/config_snapshot.py current --config "{{.CONFIG}}" --run-root "{{.RUN_ROOT}}") || exit 1
         docker rm -f {{.CONTAINER_NAME}} >$OUTPUT 2>&1 || true
         docker run -d --name {{.CONTAINER_NAME}} \
           --restart unless-stopped \
           --network {{.NETWORK}} \
           --ip {{.IP}} \
-          -v {{.CONFIG_DIR}}/resolv.conf:/etc/resolv.conf:ro \
-          --env-file {{.CONFIG_DIR}}/env \
-          -v {{.CONFIG_DIR}}/rspamd-overlay:/etc/rspamd-overlay:ro \
+          -v "$CONFIG_DIR/resolv.conf:/etc/resolv.conf:ro" \
+          --env-file "$CONFIG_DIR/env" \
+          -v "$CONFIG_DIR/rspamd-overlay:/etc/rspamd-overlay:ro" \
           --health-cmd 'rspamc stat >/dev/null 2>&1 || exit 1' \
           --health-interval 30s \
           --health-timeout 5s \
@@ -64,6 +69,13 @@ tasks:
     desc: Recreate the rspamd container
     cmds:
       - task: down
+      - task: up
+
+  reload:
+    desc: Recreate rspamd on the pinned config snapshot, only if it is running
+    status:
+      - '! docker ps -q --filter "name=^/{{.CONTAINER_NAME}}$" | grep -q .'
+    cmds:
       - task: up
 
   # ════════════════════════════════════════════════════════

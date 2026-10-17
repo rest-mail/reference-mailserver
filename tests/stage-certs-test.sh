@@ -43,6 +43,10 @@ EOF
 chmod +x "$scratch/bin/docker"
 
 export PATH="$scratch/bin:$PATH" STUB_VOLUMES="$scratch/volumes" STUB_LOG="$scratch/docker.log"
+export RUN_ROOT="$scratch/run"
+for config in mail1 mail2; do
+  (cd "$root" && task config:snapshot CONFIG="$config")
+done
 me="$(id -u):$(id -g)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -115,8 +119,10 @@ issue
 # An env file pointing outside /certs stages nothing and starts nothing.
 cp -r "$root/configs/mail1" "$scratch/stagetest"
 sed -i 's|^POSTFIX_TLS_KEY=.*|POSTFIX_TLS_KEY=/etc/ca.key|' "$scratch/stagetest/env"
+python3 "$root/scripts/config_snapshot.py" snapshot --config stagetest \
+  --source "$scratch/stagetest" --run-root "$RUN_ROOT" >/dev/null
 : >"$STUB_LOG"
-if (cd "$root" && task -t tasks/postfix.yml up CONFIG_DIR="$scratch/stagetest" PROJECT=mailref-stagetest \
+if (cd "$root" && task -t tasks/postfix.yml up CONFIG=stagetest PROJECT=mailref-stagetest \
   CERTS_VOLUME=issuing CERTS_OWNER="$me" >"$scratch/out" 2>&1); then
   fail "postfix:up staged a key outside /certs"
 fi

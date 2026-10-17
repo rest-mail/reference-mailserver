@@ -70,7 +70,7 @@ jobs:
       - name: Install PyYAML
         run: pip install --quiet pyyaml
 
-      - name: Fixture tests (drift, missing, malformed, ambiguous input; task up stops before docker)
+      - name: Fixture tests (API_IP drift; config snapshots and every daemon mount, docker stubbed)
         run: python3 -m unittest discover -s scripts -v
 
       # The real cross-repo check: configs/*/dns.env against the testbed's
