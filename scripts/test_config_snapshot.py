@@ -181,7 +181,7 @@ class SnapshotToolTest(Fixture):
         link = os.path.join(self.tmp, "run-link")
         os.symlink(self.checkout, link)
         self.assertRejectedWithoutSideEffects("inside the git work tree", run_root=link)
-        self.assertEqual(os.listdir(self.checkout), [".git", "configs"])
+        self.assertEqual(sorted(os.listdir(self.checkout)), [".git", "configs"])
 
     def test_relative_run_root(self):
         self.assertRejectedWithoutSideEffects("absolute", run_root="run")
